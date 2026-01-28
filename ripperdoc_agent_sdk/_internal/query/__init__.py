@@ -120,6 +120,29 @@ class Query:
             await self._tg.__aenter__()
             self._tg.start_soon(self._read_messages)
 
+    async def _broadcast_message(
+        self,
+        message: dict[str, Any] | None,
+        to_legacy_stream: bool = True,
+    ) -> None:
+        """Broadcast a message to all registered consumers.
+
+        Args:
+            message: The message to broadcast (or None for end of stream).
+            to_legacy_stream: Whether to also send to the legacy _message_send stream.
+        """
+        # Broadcast to queue manager
+        if self._message_router:
+            await self._message_router.broadcast_to_queues(message)
+
+        # Send to legacy stream if requested
+        if to_legacy_stream and message is not None:
+            try:
+                await self._message_send.send(message)
+            except Exception:
+                # Stream might be closed
+                pass
+
     async def _read_messages(self) -> None:
         """Background task that reads messages from transport and routes them."""
         try:
@@ -140,10 +163,7 @@ class Query:
 
                     # If not a control message, broadcast to queues
                     if not is_routed:
-                        await self._message_router.broadcast_to_queues(message)
-
-                        # Also send to legacy stream
-                        await self._message_send.send(message)
+                        await self._broadcast_message(message)
 
                         # Track results for proper stream closure
                         if msg_type == "result":
@@ -155,14 +175,7 @@ class Query:
             logger.error(f"Error in _read_messages: {e}")
             error_message = {"type": "error", "error": str(e)}
             if not self._closed and not self._stream_manager.is_closed:
-                try:
-                    await self._message_send.send(error_message)
-                except Exception:
-                    pass
-
-            # Also send error to all queues
-            if self._message_router:
-                await self._message_router.broadcast_to_queues(error_message)
+                await self._broadcast_message(error_message)
 
         finally:
             logger.debug("[read_messages] Message reading loop ended")
