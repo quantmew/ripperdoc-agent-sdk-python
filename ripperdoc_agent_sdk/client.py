@@ -358,7 +358,14 @@ class RipperdocAgentOptions:
     output_format: Optional[Dict[str, Any]] = None
 
     def __post_init__(self) -> None:
-        """Handle deprecated yolo_mode parameter."""
+        """Handle deprecated yolo_mode parameter and validate permission_mode."""
+        # Validate permission_mode
+        if not PermissionMode.is_valid(self.permission_mode):
+            raise ValueError(
+                f"Invalid permission_mode: '{self.permission_mode}'. "
+                f"Valid modes are: {PermissionMode.VALID_MODES}"
+            )
+
         # If yolo_mode is explicitly set to True, apply permission_mode
         if self.yolo_mode:
             warnings.warn(
