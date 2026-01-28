@@ -2,127 +2,66 @@
 
 This module defines the message types used for communication between
 the SDK and the CLI subprocess over stdio.
+
+This module now re-exports types from the protocol module for backward
+compatibility. New code should import directly from ripperdoc_agent_sdk.protocol.
 """
 
 from dataclasses import dataclass, field
 from typing import Any, Literal, NotRequired, TypedDict, Union
 
-
-# =============================================================================
-# Control Request Types (SDK → CLI)
-# =============================================================================
-
-class SDKControlInitializeRequest(TypedDict):
-    """Initialize request - sent when SDK connects to CLI."""
-    subtype: Literal["initialize"]
-    options: dict[str, Any]  # RipperdocAgentOptions as dict
-    hooks: dict[str, list[dict[str, Any]]] | None
-
-
-class SDKControlQueryRequest(TypedDict):
-    """Query request - send a query to the CLI."""
-    subtype: Literal["query"]
-    prompt: str
-    session_id: str
-
-
-class SDKControlPermissionRequest(TypedDict):
-    """Permission request - ask if a tool can be used."""
-    subtype: Literal["can_use_tool"]
-    tool_name: str
-    input: dict[str, Any]
-    permission_suggestions: list[dict[str, Any]] | None
-    blocked_path: str | None
-
-
-class SDKControlInterruptRequest(TypedDict):
-    """Interrupt request - interrupt the current query."""
-    subtype: Literal["interrupt"]
-
-
-class SDKControlSetPermissionModeRequest(TypedDict):
-    """Set permission mode request."""
-    subtype: Literal["set_permission_mode"]
-    mode: str  # PermissionMode
-
-
-class SDKControlSetModelRequest(TypedDict):
-    """Set model request."""
-    subtype: Literal["set_model"]
-    model: str | None
-
-
-class SDKControlRewindFilesRequest(TypedDict):
-    """Rewind files request."""
-    subtype: Literal["rewind_files"]
-    user_message_id: str
-
-
-class SDKHookCallbackRequest(TypedDict):
-    """Hook callback request - execute a hook callback."""
-    subtype: Literal["hook_callback"]
-    callback_id: str
-    input: dict[str, Any]
-    tool_use_id: str | None
-
-
-class SDKControlMcpMessageRequest(TypedDict):
-    """MCP message request - send message to MCP server."""
-    subtype: Literal["mcp_message"]
-    server_name: str
-    message: dict[str, Any]
-
-
-# Union of all control request types
-SDKControlRequest = TypedDict(
-    "SDKControlRequest",
-    {
-        "type": Literal["control_request"],
-        "request_id": str,
-        "request": Union[
-            SDKControlInitializeRequest,
-            SDKControlQueryRequest,
-            SDKControlPermissionRequest,
-            SDKControlInterruptRequest,
-            SDKControlSetPermissionModeRequest,
-            SDKControlSetModelRequest,
-            SDKControlRewindFilesRequest,
-            SDKHookCallbackRequest,
-            SDKControlMcpMessageRequest,
-        ],
-    },
+# Import Pydantic models from protocol module
+from ripperdoc_agent_sdk.protocol import (
+    ControlInitializeRequest as _ControlInitializeRequest,
+    ControlQueryRequest as _ControlQueryRequest,
+    ControlPermissionRequest as _ControlPermissionRequest,
+    ControlInterruptRequest as _ControlInterruptRequest,
+    ControlSetPermissionModeRequest as _ControlSetPermissionModeRequest,
+    ControlSetModelRequest as _ControlSetModelRequest,
+    ControlRewindFilesRequest as _ControlRewindFilesRequest,
+    ControlHookCallbackRequest as _ControlHookCallbackRequest,
+    ControlMcpMessageRequest as _ControlMcpMessageRequest,
+    ControlResponseSuccess as _ControlResponseSuccess,
+    ControlResponseError as _ControlResponseError,
+    ResultMessage as _ProtocolResultMessage,
+    PermissionUpdate as _ProtocolPermissionUpdate,
+    PermissionRuleValue as _ProtocolPermissionRuleValue,
+    HookMatcherConfig as _ProtocolHookMatcherConfig,
+    ServerInfo as _ProtocolServerInfo,
+    model_to_dict,
 )
 
 
 # =============================================================================
-# Control Response Types (CLI → SDK)
+# Backward Compatibility: Re-export Pydantic models
 # =============================================================================
 
-class ControlResponseSuccess(TypedDict):
-    """Successful control response."""
-    subtype: Literal["success"]
-    request_id: str
-    response: dict[str, Any] | None
+# Control Request Types (SDK → CLI) - Re-export Pydantic models
+SDKControlInitializeRequest = _ControlInitializeRequest
+SDKControlQueryRequest = _ControlQueryRequest
+SDKControlPermissionRequest = _ControlPermissionRequest
+SDKControlInterruptRequest = _ControlInterruptRequest
+SDKControlSetPermissionModeRequest = _ControlSetPermissionModeRequest
+SDKControlSetModelRequest = _ControlSetModelRequest
+SDKControlRewindFilesRequest = _ControlRewindFilesRequest
+SDKHookCallbackRequest = _ControlHookCallbackRequest
+SDKControlMcpMessageRequest = _ControlMcpMessageRequest
 
+# Control Response Types (CLI → SDK) - Re-export Pydantic models
+ControlResponseSuccess = _ControlResponseSuccess
+ControlResponseError = _ControlResponseError
+ControlResponse = _ControlResponseSuccess | _ControlResponseError
 
-class ControlResponseError(TypedDict):
-    """Error control response."""
-    subtype: Literal["error"]
-    request_id: str
-    error: str
-
-
-ControlResponse = Union[ControlResponseSuccess, ControlResponseError]
-
-
-class SDKControlResponse(TypedDict):
-    """Control response wrapper."""
-    type: Literal["control_response"]
-    response: ControlResponse
+# Permission and Hook types - Re-export Pydantic models
+PermissionUpdate = _ProtocolPermissionUpdate
+PermissionRuleValue = _ProtocolPermissionRuleValue
+HookMatcherConfig = _ProtocolHookMatcherConfig
+ServerInfo = _ProtocolServerInfo
 
 
 # =============================================================================
-# Stream Message Types (CLI → SDK)
+# Stream Message Types (CLI → SDK) - Keep as TypedDict for backward compatibility
+# These are used for parsing incoming messages from CLI
 # =============================================================================
 
 class StreamUserMessage(TypedDict):
@@ -192,114 +131,100 @@ StreamMessage = Union[
 
 
 # =============================================================================
-# Permission Update Types (used in control protocol)
+# Legacy TypedDict aliases for backward compatibility
+# These are deprecated in favor of Pydantic models
 # =============================================================================
 
-PermissionUpdateDestination = Literal[
-    "userSettings", "projectSettings", "localSettings", "session"
-]
+class _SDKControlInitializeRequest(TypedDict):
+    """Initialize request - sent when SDK connects to CLI (DEPRECATED - use Pydantic model)."""
+    subtype: Literal["initialize"]
+    options: dict[str, Any]
+    hooks: dict[str, list[dict[str, Any]]] | None
 
-PermissionBehavior = Literal["allow", "deny", "ask"]
+
+class _SDKControlQueryRequest(TypedDict):
+    """Query request - send a query to the CLI (DEPRECATED - use Pydantic model)."""
+    subtype: Literal["query"]
+    prompt: str
+    session_id: str
 
 
-@dataclass
-class PermissionRuleValue:
-    """Permission rule value."""
+class _SDKControlPermissionRequest(TypedDict):
+    """Permission request (DEPRECATED - use Pydantic model)."""
+    subtype: Literal["can_use_tool"]
     tool_name: str
-    rule_content: str | None = None
+    input: dict[str, Any]
+    permission_suggestions: list[dict[str, Any]] | None
+    blocked_path: str | None
 
 
-@dataclass
-class PermissionUpdate:
-    """Permission update configuration."""
-    type: Literal[
-        "addRules",
-        "replaceRules",
-        "removeRules",
-        "setMode",
-        "addDirectories",
-        "removeDirectories",
-    ]
-    rules: list[PermissionRuleValue] | None = None
-    behavior: PermissionBehavior | None = None
-    mode: str | None = None  # PermissionMode
-    directories: list[str] | None = None
-    destination: PermissionUpdateDestination | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary format for JSON serialization."""
-        result: dict[str, Any] = {"type": self.type}
-
-        if self.destination is not None:
-            result["destination"] = self.destination
-
-        if self.type in ["addRules", "replaceRules", "removeRules"]:
-            if self.rules is not None:
-                result["rules"] = [
-                    {
-                        "toolName": rule.tool_name,
-                        "ruleContent": rule.rule_content,
-                    }
-                    for rule in self.rules
-                ]
-            if self.behavior is not None:
-                result["behavior"] = self.behavior
-
-        elif self.type == "setMode":
-            if self.mode is not None:
-                result["mode"] = self.mode
-
-        elif self.type in ["addDirectories", "removeDirectories"]:
-            if self.directories is not None:
-                result["directories"] = self.directories
-
-        return result
+class _SDKControlInterruptRequest(TypedDict):
+    """Interrupt request (DEPRECATED - use Pydantic model)."""
+    subtype: Literal["interrupt"]
 
 
-# =============================================================================
-# Hook Types (used in control protocol)
-# =============================================================================
+class _SDKControlSetPermissionModeRequest(TypedDict):
+    """Set permission mode request (DEPRECATED - use Pydantic model)."""
+    subtype: Literal["set_permission_mode"]
+    mode: str
 
-HookEvent = (
-    Literal["PreToolUse"]
-    | Literal["PostToolUse"]
-    | Literal["UserPromptSubmit"]
-    | Literal["Stop"]
-    | Literal["SubagentStop"]
-    | Literal["PreCompact"]
+
+class _SDKControlSetModelRequest(TypedDict):
+    """Set model request (DEPRECATED - use Pydantic model)."""
+    subtype: Literal["set_model"]
+    model: str | None
+
+
+class _SDKControlRewindFilesRequest(TypedDict):
+    """Rewind files request (DEPRECATED - use Pydantic model)."""
+    subtype: Literal["rewind_files"]
+    user_message_id: str
+
+
+class _SDKHookCallbackRequest(TypedDict):
+    """Hook callback request (DEPRECATED - use Pydantic model)."""
+    subtype: Literal["hook_callback"]
+    callback_id: str
+    input: dict[str, Any]
+    tool_use_id: str | None
+
+
+class _SDKControlMcpMessageRequest(TypedDict):
+    """MCP message request (DEPRECATED - use Pydantic model)."""
+    subtype: Literal["mcp_message"]
+    server_name: str
+    message: dict[str, Any]
+
+
+# Union of all control request types (for type checking)
+SDKControlRequest = TypedDict(
+    "SDKControlRequest",
+    {
+        "type": Literal["control_request"],
+        "request_id": str,
+        "request": Union[
+            _SDKControlInitializeRequest,
+            _SDKControlQueryRequest,
+            _SDKControlPermissionRequest,
+            _SDKControlInterruptRequest,
+            _SDKControlSetPermissionModeRequest,
+            _SDKControlSetModelRequest,
+            _SDKControlRewindFilesRequest,
+            _SDKHookCallbackRequest,
+            _SDKControlMcpMessageRequest,
+        ],
+    },
 )
 
 
-@dataclass
-class HookMatcher:
-    """Hook matcher configuration for control protocol."""
-    matcher: str | None = None
-    hooks: list[Any] = field(default_factory=list)  # HookCallback functions
-    timeout: float | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary format for JSON serialization."""
-        result: dict[str, Any] = {"matcher": self.matcher}
-        if self.timeout is not None:
-            result["timeout"] = self.timeout
-        return result
-
-
-# =============================================================================
-# Server Info Types
-# =============================================================================
-
-@dataclass
-class ServerInfo:
-    """Server initialization information."""
-    commands: list[dict[str, Any]] = field(default_factory=list)
-    output_style: str = "default"
-    version: str = "unknown"
-    features: list[str] = field(default_factory=list)
+class SDKControlResponse(TypedDict):
+    """Control response wrapper (DEPRECATED - use Pydantic model)."""
+    type: Literal["control_response"]
+    response: ControlResponse
 
 
 __all__ = [
-    # Control Requests
+    # Control Requests (Pydantic models)
     "SDKControlRequest",
     "SDKControlInitializeRequest",
     "SDKControlQueryRequest",
@@ -310,12 +235,12 @@ __all__ = [
     "SDKControlRewindFilesRequest",
     "SDKHookCallbackRequest",
     "SDKControlMcpMessageRequest",
-    # Control Responses
+    # Control Responses (Pydantic models)
     "SDKControlResponse",
     "ControlResponse",
     "ControlResponseSuccess",
     "ControlResponseError",
-    # Stream Messages
+    # Stream Messages (TypedDict)
     "StreamMessage",
     "StreamUserMessage",
     "StreamAssistantMessage",
@@ -326,11 +251,8 @@ __all__ = [
     # Permission
     "PermissionUpdate",
     "PermissionRuleValue",
-    "PermissionUpdateDestination",
-    "PermissionBehavior",
     # Hooks
-    "HookEvent",
-    "HookMatcher",
+    "HookMatcherConfig",
     # Server Info
     "ServerInfo",
 ]

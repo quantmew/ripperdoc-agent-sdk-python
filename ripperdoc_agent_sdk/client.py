@@ -61,6 +61,11 @@ from ripperdoc_agent_sdk.adapter import (
     AsyncMessageAdapter,
     ResultMessageFactory,
 )
+from ripperdoc_agent_sdk.protocol import (
+    ControlInitializeRequest,
+    ControlQueryRequest,
+    model_to_dict,
+)
 
 # Subprocess mode imports (lazy loaded to avoid circular imports)
 _subprocess_transport = None
@@ -606,11 +611,12 @@ class RipperdocSDKClient:
 
         # Send initialize request
         try:
+            init_request = ControlInitializeRequest(
+                options=options_dict,
+                hooks=self._build_hooks_dict(),
+            )
             init_response = await self._query._send_control_request(
-                {
-                    "subtype": "initialize",
-                    "options": options_dict,
-                },
+                init_request,
                 timeout=60.0,
             )
             self._session_id = init_response.get("response", {}).get("session_id")
@@ -774,13 +780,12 @@ class RipperdocSDKClient:
 
         async def _runner() -> None:
             try:
-                # Send query request via control protocol
-                await self._query._send_control_request(
-                    {
-                        "subtype": "query",
-                        "prompt": prompt,
-                    }
+                # Send query request via control protocol using Pydantic model
+                query_request = ControlQueryRequest(
+                    prompt=prompt,
+                    session_id=self._session_id or "default",
                 )
+                await self._query._send_control_request(query_request)
 
                 # Receive messages from the query's message stream
                 # Use a new iterator for each query

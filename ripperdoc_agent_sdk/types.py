@@ -17,6 +17,13 @@ from typing import (
     Generic,
 )
 
+# Import protocol models for type compatibility
+from ripperdoc_agent_sdk.protocol import (
+    PermissionUpdate as ProtocolPermissionUpdate,
+    PermissionRuleValue as ProtocolPermissionRuleValue,
+    ResultMessage as ProtocolResultMessage,
+)
+
 # =============================================================================
 # ContentBlock Types
 # =============================================================================
@@ -119,6 +126,8 @@ class ResultMessage:
     """Result message with cost and usage information.
 
     Indicates the completion of a request with timing, cost, and usage statistics.
+    This is a dataclass version for backward compatibility. The protocol module
+    uses a Pydantic model for validation.
     """
 
     subtype: str
@@ -131,6 +140,49 @@ class ResultMessage:
     usage: dict[str, Any] | None = None
     result: str | None = None
     structured_output: Any = None
+
+    @classmethod
+    def from_protocol(cls, protocol_msg: ProtocolResultMessage) -> "ResultMessage":
+        """Create a ResultMessage from the protocol Pydantic model."""
+        # Convert UsageInfo to dict if present
+        usage_dict = None
+        if protocol_msg.usage:
+            usage_dict = protocol_msg.usage.model_dump()
+
+        return cls(
+            subtype=protocol_msg.subtype,
+            duration_ms=protocol_msg.duration_ms,
+            duration_api_ms=protocol_msg.duration_api_ms,
+            is_error=protocol_msg.is_error,
+            num_turns=protocol_msg.num_turns,
+            session_id=protocol_msg.session_id,
+            total_cost_usd=protocol_msg.total_cost_usd,
+            usage=usage_dict,
+            result=protocol_msg.result,
+            structured_output=protocol_msg.structured_output,
+        )
+
+    def to_protocol(self) -> ProtocolResultMessage:
+        """Convert to the protocol Pydantic model."""
+        from ripperdoc_agent_sdk.protocol import UsageInfo
+
+        # Convert usage dict to UsageInfo if present
+        usage_info = None
+        if self.usage:
+            usage_info = UsageInfo(**self.usage)
+
+        return ProtocolResultMessage(
+            subtype=self.subtype,
+            duration_ms=self.duration_ms,
+            duration_api_ms=self.duration_api_ms,
+            is_error=self.is_error,
+            num_turns=self.num_turns,
+            session_id=self.session_id,
+            total_cost_usd=self.total_cost_usd,
+            usage=usage_info,
+            result=self.result,
+            structured_output=self.structured_output,
+        )
 
 
 @dataclass
@@ -167,70 +219,10 @@ PermissionUpdateDestination = Literal[
 PermissionBehavior = Literal["allow", "deny", "ask"]
 
 
-@dataclass
-class PermissionRuleValue:
-    """Permission rule value."""
-
-    tool_name: str
-    rule_content: str | None = None
-
-
-@dataclass
-class PermissionUpdate:
-    """Permission update configuration.
-
-    Defines how permissions should be modified during a session.
-    """
-
-    type: Literal[
-        "addRules",
-        "replaceRules",
-        "removeRules",
-        "setMode",
-        "addDirectories",
-        "removeDirectories",
-    ]
-    rules: list[PermissionRuleValue] | None = None
-    behavior: PermissionBehavior | None = None
-    mode: PermissionMode | None = None
-    directories: list[str] | None = None
-    destination: PermissionUpdateDestination | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert PermissionUpdate to dictionary format matching TypeScript control protocol."""
-        result: dict[str, Any] = {
-            "type": self.type,
-        }
-
-        # Add destination for all variants
-        if self.destination is not None:
-            result["destination"] = self.destination
-
-        # Handle different type variants
-        if self.type in ["addRules", "replaceRules", "removeRules"]:
-            # Rules-based variants require rules and behavior
-            if self.rules is not None:
-                result["rules"] = [
-                    {
-                        "toolName": rule.tool_name,
-                        "ruleContent": rule.rule_content,
-                    }
-                    for rule in self.rules
-                ]
-            if self.behavior is not None:
-                result["behavior"] = self.behavior
-
-        elif self.type == "setMode":
-            # Mode variant requires mode
-            if self.mode is not None:
-                result["mode"] = self.mode
-
-        elif self.type in ["addDirectories", "removeDirectories"]:
-            # Directory variants require directories
-            if self.directories is not None:
-                result["directories"] = self.directories
-
-        return result
+# Re-export PermissionRuleValue and PermissionUpdate from protocol module
+# for backward compatibility
+PermissionRuleValue = ProtocolPermissionRuleValue
+PermissionUpdate = ProtocolPermissionUpdate
 
 
 @dataclass
@@ -439,11 +431,28 @@ class HookMatcher:
     """Hook matcher configuration.
 
     Defines when a hook should be triggered based on tool names or patterns.
+    This is a dataclass version for backward compatibility. The protocol module
+    uses a Pydantic model for validation.
     """
 
     matcher: str | None = None
     hooks: list[HookCallback] = field(default_factory=list)
     timeout: float | None = None
+
+    def to_protocol(self) -> ProtocolHookMatcherConfig:
+        """Convert to the protocol Pydantic model."""
+        return ProtocolHookMatcherConfig(
+            matcher=self.matcher,
+            timeout=self.timeout,
+        )
+
+    @classmethod
+    def from_protocol(cls, protocol_config: ProtocolHookMatcherConfig) -> "HookMatcher":
+        """Create a HookMatcher from the protocol Pydantic model."""
+        return cls(
+            matcher=protocol_config.matcher,
+            timeout=protocol_config.timeout,
+        )
 
 
 # =============================================================================

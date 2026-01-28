@@ -23,6 +23,17 @@ With a persistent client:
         async for message in client.receive_messages():
             print(message)
     ```
+
+Protocol Models:
+    ```python
+    from ripperdoc_sdk import protocol
+
+    # Create a control request using Pydantic models
+    init_request = protocol.ControlInitializeRequest(
+        options={"model": "main"},
+        hooks=None,
+    )
+    ```
 """
 
 from ripperdoc_agent_sdk.client import (
@@ -62,6 +73,10 @@ from ripperdoc_agent_sdk.control_protocol import (
     PermissionUpdate as ControlPermissionUpdate,
     ServerInfo,
 )
+
+# Protocol models (Pydantic models for type-safe protocol communication)
+from ripperdoc_agent_sdk import protocol as _protocol_module
+protocol = _protocol_module
 
 from ripperdoc_agent_sdk.types import (
     # Main exports
@@ -141,6 +156,8 @@ __all__ = [
     # Main exports
     "query",
     "__version__",
+    # Protocol module (Pydantic models)
+    "protocol",
     # Transport
     "Transport",
     "StdioTransport",

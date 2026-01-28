@@ -31,6 +31,18 @@ from ripperdoc_agent_sdk.types import (
     SystemMessage,
     ToolPermissionContext,
 )
+from ripperdoc_agent_sdk.protocol import (
+    ControlInitializeRequest,
+    ControlQueryRequest,
+    ControlInterruptRequest,
+    ControlSetPermissionModeRequest,
+    ControlSetModelRequest,
+    ControlRewindFilesRequest,
+    ControlResponseSuccess,
+    ControlResponseError,
+    model_to_dict,
+)
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -386,18 +398,24 @@ class Query:
 
     async def _send_control_request(
         self,
-        request: dict[str, Any],
+        request: dict[str, Any] | BaseModel,
         timeout: float | None = None,
     ) -> dict[str, Any]:
         """Send a control request and wait for response."""
         self._request_counter += 1
         request_id = f"req_{self._request_counter}"
 
+        # Convert Pydantic model to dict if needed
+        if isinstance(request, BaseModel):
+            request_dict = model_to_dict(request)
+        else:
+            request_dict = request
+
         # Build the control request message
         message = {
             "type": "control_request",
             "request_id": request_id,
-            "request": request,
+            "request": request_dict,
         }
 
         # Create event for response
@@ -576,37 +594,22 @@ class Query:
 
     async def set_permission_mode(self, mode: str) -> None:
         """Change permission mode during conversation."""
-        request = {
-            "subtype": "set_permission_mode",
-            "mode": mode,
-        }
-
+        request = ControlSetPermissionModeRequest(mode=mode)
         await self._send_control_request(request)
 
     async def set_model(self, model: str | None = None) -> None:
         """Change the AI model during conversation."""
-        request = {
-            "subtype": "set_model",
-            "model": model,
-        }
-
+        request = ControlSetModelRequest(model=model)
         await self._send_control_request(request)
 
     async def interrupt(self) -> None:
         """Interrupt the current query."""
-        request = {
-            "subtype": "interrupt",
-        }
-
+        request = ControlInterruptRequest()
         await self._send_control_request(request)
 
     async def rewind_files(self, user_message_id: str) -> None:
         """Rewind tracked files to their state at a specific user message."""
-        request = {
-            "subtype": "rewind_files",
-            "user_message_id": user_message_id,
-        }
-
+        request = ControlRewindFilesRequest(user_message_id=user_message_id)
         await self._send_control_request(request)
 
     async def close(self) -> None:
