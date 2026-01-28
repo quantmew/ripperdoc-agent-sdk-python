@@ -3,19 +3,23 @@
 This module defines type-safe models for all JSON messages exchanged
 over the stdio protocol, replacing raw dictionary construction with
 validated, self-documenting Pydantic models.
+
+All models extend HybridModel for dataclass-like compatibility.
 """
 
 from __future__ import annotations
 
 from typing import Any, Literal
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import Field, ConfigDict
+
+from ripperdoc_agent_sdk.protocol.base import HybridModel
 
 
 # ============================================================================
 # Content Block Models
 # ============================================================================
 
-class ContentBlock(BaseModel):
+class ContentBlock(HybridModel):
     """Base class for content blocks in messages."""
 
     model_config = ConfigDict(
@@ -57,7 +61,7 @@ class ToolResultContentBlock(ContentBlock):
     is_error: bool | None = None
 
 
-class ImageSource(BaseModel):
+class ImageSource(HybridModel):
     """Image source data."""
 
     type: str = Field(default="base64")
@@ -86,7 +90,7 @@ ContentBlockType = (
 # Message Models
 # ============================================================================
 
-class MessageData(BaseModel):
+class MessageData(HybridModel):
     """Base message data."""
 
     model_config = ConfigDict(
@@ -108,7 +112,7 @@ class UserMessageData(MessageData):
     content: str = ""
 
 
-class AssistantStreamMessage(BaseModel):
+class AssistantStreamMessage(HybridModel):
     """An assistant message sent to the SDK."""
 
     type: str = Field(default="assistant")
@@ -116,7 +120,7 @@ class AssistantStreamMessage(BaseModel):
     parent_tool_use_id: str | None = None
 
 
-class UserStreamMessage(BaseModel):
+class UserStreamMessage(HybridModel):
     """A user message sent to the SDK."""
 
     type: str = Field(default="user")
@@ -134,7 +138,7 @@ StreamMessage = AssistantStreamMessage | UserStreamMessage
 # Control Protocol Request Models (SDK → CLI)
 # ============================================================================
 
-class ControlRequestData(BaseModel):
+class ControlRequestData(HybridModel):
     """Base class for control request data."""
 
     model_config = ConfigDict(
@@ -213,7 +217,7 @@ class ControlMcpMessageRequest(ControlRequestData):
     message: dict[str, Any]
 
 
-class ControlRequestMessage(BaseModel):
+class ControlRequestMessage(HybridModel):
     """A control request message wrapper."""
 
     type: Literal["control_request"] = "control_request"
@@ -235,7 +239,7 @@ class ControlRequestMessage(BaseModel):
 # Control Protocol Response Models (CLI → SDK)
 # ============================================================================
 
-class ControlResponseData(BaseModel):
+class ControlResponseData(HybridModel):
     """Base class for control response data."""
 
     model_config = ConfigDict(
@@ -260,7 +264,7 @@ class ControlResponseError(ControlResponseData):
     error: str
 
 
-class ControlResponseMessage(BaseModel):
+class ControlResponseMessage(HybridModel):
     """A control response message wrapper."""
 
     type: Literal["control_response"] = "control_response"
@@ -271,7 +275,7 @@ class ControlResponseMessage(BaseModel):
 # Result/Usage Models
 # ============================================================================
 
-class UsageInfo(BaseModel):
+class UsageInfo(HybridModel):
     """Token usage information."""
 
     input_tokens: int = 0
@@ -280,13 +284,13 @@ class UsageInfo(BaseModel):
     output_tokens: int = 0
 
 
-class MCPServerInfo(BaseModel):
+class MCPServerInfo(HybridModel):
     """MCP server information."""
 
     name: str
 
 
-class InitializeResponseData(BaseModel):
+class InitializeResponseData(HybridModel):
     """Response data for initialize request."""
 
     session_id: str
@@ -307,7 +311,7 @@ class InitializeResponseData(BaseModel):
     )
 
 
-class ResultMessage(BaseModel):
+class ResultMessage(HybridModel):
     """A result message sent at the end of a query."""
 
     type: Literal["result"] = "result"
@@ -327,28 +331,28 @@ class ResultMessage(BaseModel):
 # Permission Response Models
 # ============================================================================
 
-class PermissionResponseAllow(BaseModel):
+class PermissionResponseAllow(HybridModel):
     """A permission allow response."""
 
     decision: Literal["allow"] = "allow"
     updated_input: dict[str, Any] | None = Field(None, alias="updatedInput")
 
 
-class PermissionResponseDeny(BaseModel):
+class PermissionResponseDeny(HybridModel):
     """A permission deny response."""
 
     decision: Literal["deny"] = "deny"
     message: str = ""
 
 
-class PermissionRuleValue(BaseModel):
+class PermissionRuleValue(HybridModel):
     """Permission rule value."""
 
     tool_name: str = Field(alias="toolName")
     rule_content: str | None = Field(None, alias="ruleContent")
 
 
-class PermissionUpdate(BaseModel):
+class PermissionUpdate(HybridModel):
     """Permission update configuration."""
 
     type: Literal[
@@ -377,7 +381,7 @@ class PermissionUpdate(BaseModel):
 # Hook Models
 # ============================================================================
 
-class HookMatcherConfig(BaseModel):
+class HookMatcherConfig(HybridModel):
     """Hook matcher configuration for control protocol."""
 
     matcher: str | None = None
@@ -393,7 +397,7 @@ class HookMatcherConfig(BaseModel):
 # Server Info Models
 # ============================================================================
 
-class ServerInfo(BaseModel):
+class ServerInfo(HybridModel):
     """Server initialization information."""
 
     commands: list[dict[str, Any]] = Field(default_factory=list)
@@ -406,22 +410,24 @@ class ServerInfo(BaseModel):
 # Helper Functions
 # ============================================================================
 
-def model_to_dict(model: BaseModel) -> dict[str, Any]:
-    """Convert a Pydantic model to a JSON-serializable dictionary.
+def model_to_dict(model: HybridModel) -> dict[str, Any]:
+    """Convert a HybridModel to a JSON-serializable dictionary.
 
     This handles exclude_none=True and ensures proper serialization,
     while always including type/subtype fields for protocol messages.
 
     Args:
-        model: The Pydantic model to convert.
+        model: The HybridModel to convert.
 
     Returns:
         A JSON-serializable dictionary.
     """
-    return model.model_dump(exclude_none=True, by_alias=True, mode="json")
+    return model.to_dict(exclude_none=False)
 
 
 __all__ = [
+    # Base
+    "HybridModel",
     # Content Blocks
     "ContentBlock",
     "TextContentBlock",

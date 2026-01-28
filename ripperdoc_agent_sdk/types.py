@@ -1,93 +1,99 @@
 """SDK compatible type definitions for Ripperdoc.
+
+This module provides a unified type system that uses Pydantic models from
+the protocol module for validation and consistency, while maintaining
+backward compatibility through type aliases.
+
+Migration Notes:
+- ContentBlock types are now Pydantic models (HybridModel) with dataclass-like API
+- ResultMessage is now a Pydantic model with .to_dict() method
+- Permission types use Pydantic models from protocol module
+- Old dataclass patterns still work through backward compatibility
 """
 
 from __future__ import annotations
 
+import warnings
+from abc import ABC, abstractmethod
 from collections.abc import AsyncIterable, Callable, Awaitable
 from dataclasses import dataclass, field
-from enum import Enum
-from pathlib import Path
 from typing import (
     Any,
     Literal,
     NotRequired,
     TypedDict,
-    TypeVar,
-    Union,
-    Generic,
 )
 
-# Import protocol models for type compatibility
+# =============================================================================
+# Import Pydantic Models from Protocol Module
+# =============================================================================
+
 from ripperdoc_agent_sdk.protocol import (
-    PermissionUpdate as ProtocolPermissionUpdate,
-    PermissionRuleValue as ProtocolPermissionRuleValue,
-    ResultMessage as ProtocolResultMessage,
+    # Base
+    HybridModel,
+    # Content Blocks (Pydantic models)
+    TextContentBlock,
+    ThinkingContentBlock,
+    ToolUseContentBlock,
+    ToolResultContentBlock,
+    ImageContentBlock,
+    ImageSource,
+    ContentBlockType,
+    # Messages (Pydantic models)
+    AssistantStreamMessage,
+    UserStreamMessage,
+    StreamMessage,
+    # Result/Usage (Pydantic models)
+    UsageInfo,
+    ResultMessage,
+    # Permissions (Pydantic models)
+    PermissionResponseAllow,
+    PermissionResponseDeny,
+    PermissionUpdate,
+    PermissionRuleValue,
+    # Hooks (Pydantic models)
+    HookMatcherConfig,
+    # Control protocol (Pydantic models)
+    ControlResponseSuccess,
+    ControlResponseError,
+    # Helpers
+    model_to_dict,
+)
+from ripperdoc_agent_sdk.config import (
+    PermissionMode as ConfigPermissionMode,
+    PermissionUpdateDestination as ConfigPermissionUpdateDestination,
+    PermissionBehavior as ConfigPermissionBehavior,
+    HookEvent as ConfigHookEvent,
+    SettingSource as ConfigSettingSource,
+    McpConfig,
+    SdkBeta as ConfigSdkBeta,
 )
 
 # =============================================================================
-# ContentBlock Types
+# Content Block Type Aliases (Backward Compatible)
 # =============================================================================
 
+# Re-export content blocks with friendly names
+TextBlock = TextContentBlock
+ThinkingBlock = ThinkingContentBlock
+ToolUseBlock = ToolUseContentBlock
+ToolResultBlock = ToolResultContentBlock
+ImageBlock = ImageContentBlock
 
-@dataclass
-class TextBlock:
-    """Text content block.
-
-    Represents plain text content in a message.
-    """
-
-    text: str
-
-
-@dataclass
-class ThinkingBlock:
-    """Thinking/reasoning content block.
-
-    Contains extended thinking output from models with reasoning capabilities.
-    """
-
-    thinking: str
-    signature: str
-
-
-@dataclass
-class ToolUseBlock:
-    """Tool use content block.
-
-    Represents a tool invocation with its parameters.
-    """
-
-    id: str
-    name: str
-    input: dict[str, Any]
-
-
-@dataclass
-class ToolResultBlock:
-    """Tool result content block.
-
-    Contains the result of a tool execution.
-    """
-
-    tool_use_id: str
-    content: str | list[dict[str, Any]] | None = None
-    is_error: bool | None = None
-
-
-# Union type for all content block types
-ContentBlock = TextBlock | ThinkingBlock | ToolUseBlock | ToolResultBlock
+# Union type for all content blocks
+ContentBlock = ContentBlockType
 
 
 # =============================================================================
 # Message Types
 # =============================================================================
 
-
 @dataclass
 class UserMessage:
     """User message with optional tool results.
 
-    Represents a message sent by the user, which may include tool execution results.
+    This provides a dataclass-like interface for backward compatibility.
+    New code should use UserStreamMessage directly from the protocol module.
     """
 
     content: str | list[ContentBlock]
@@ -100,8 +106,8 @@ class UserMessage:
 class AssistantMessage:
     """Assistant message with content blocks.
 
-    Represents a response from the AI assistant, containing text, thinking,
-    and/or tool use blocks.
+    This provides a dataclass-like interface for backward compatibility.
+    New code should use AssistantStreamMessage directly from the protocol module.
     """
 
     content: list[ContentBlock]
@@ -115,6 +121,7 @@ class SystemMessage:
     """System message with metadata.
 
     Contains system-level information and events.
+    This remains a dataclass as it's SDK-specific.
     """
 
     subtype: str
@@ -122,74 +129,11 @@ class SystemMessage:
 
 
 @dataclass
-class ResultMessage:
-    """Result message with cost and usage information.
-
-    Indicates the completion of a request with timing, cost, and usage statistics.
-    This is a dataclass version for backward compatibility. The protocol module
-    uses a Pydantic model for validation.
-    """
-
-    subtype: str
-    duration_ms: int
-    duration_api_ms: int
-    is_error: bool
-    num_turns: int
-    session_id: str
-    total_cost_usd: float | None = None
-    usage: dict[str, Any] | None = None
-    result: str | None = None
-    structured_output: Any = None
-
-    @classmethod
-    def from_protocol(cls, protocol_msg: ProtocolResultMessage) -> "ResultMessage":
-        """Create a ResultMessage from the protocol Pydantic model."""
-        # Convert UsageInfo to dict if present
-        usage_dict = None
-        if protocol_msg.usage:
-            usage_dict = protocol_msg.usage.model_dump()
-
-        return cls(
-            subtype=protocol_msg.subtype,
-            duration_ms=protocol_msg.duration_ms,
-            duration_api_ms=protocol_msg.duration_api_ms,
-            is_error=protocol_msg.is_error,
-            num_turns=protocol_msg.num_turns,
-            session_id=protocol_msg.session_id,
-            total_cost_usd=protocol_msg.total_cost_usd,
-            usage=usage_dict,
-            result=protocol_msg.result,
-            structured_output=protocol_msg.structured_output,
-        )
-
-    def to_protocol(self) -> ProtocolResultMessage:
-        """Convert to the protocol Pydantic model."""
-        from ripperdoc_agent_sdk.protocol import UsageInfo
-
-        # Convert usage dict to UsageInfo if present
-        usage_info = None
-        if self.usage:
-            usage_info = UsageInfo(**self.usage)
-
-        return ProtocolResultMessage(
-            subtype=self.subtype,
-            duration_ms=self.duration_ms,
-            duration_api_ms=self.duration_api_ms,
-            is_error=self.is_error,
-            num_turns=self.num_turns,
-            session_id=self.session_id,
-            total_cost_usd=self.total_cost_usd,
-            usage=usage_info,
-            result=self.result,
-            structured_output=self.structured_output,
-        )
-
-
-@dataclass
 class StreamEvent:
     """Stream event for partial message updates during streaming.
 
     Contains raw stream events from the underlying API for advanced use cases.
+    This remains a dataclass as it's SDK-specific.
     """
 
     uuid: str
@@ -206,23 +150,23 @@ Message = UserMessage | AssistantMessage | SystemMessage | ResultMessage | Strea
 # Permission System Types
 # =============================================================================
 
-# Permission mode literal type
-PermissionMode = Literal["default", "acceptEdits", "plan", "bypassPermissions"]
+# Permission mode literal type - re-export from config
+PermissionMode = ConfigPermissionMode
 
-
-# Permission update destination
+# Permission update destination - re-export from config
 PermissionUpdateDestination = Literal[
-    "userSettings", "projectSettings", "localSettings", "session"
+    ConfigPermissionUpdateDestination.USER_SETTINGS,
+    ConfigPermissionUpdateDestination.PROJECT_SETTINGS,
+    ConfigPermissionUpdateDestination.LOCAL_SETTINGS,
+    ConfigPermissionUpdateDestination.SESSION,
 ]
 
-# Permission behavior
-PermissionBehavior = Literal["allow", "deny", "ask"]
-
-
-# Re-export PermissionRuleValue and PermissionUpdate from protocol module
-# for backward compatibility
-PermissionRuleValue = ProtocolPermissionRuleValue
-PermissionUpdate = ProtocolPermissionUpdate
+# Permission behavior - re-export from config
+PermissionBehavior = Literal[
+    ConfigPermissionBehavior.ALLOW,
+    ConfigPermissionBehavior.DENY,
+    ConfigPermissionBehavior.ASK,
+]
 
 
 @dataclass
@@ -236,32 +180,10 @@ class ToolPermissionContext:
     suggestions: list[PermissionUpdate] = field(default_factory=list)
 
 
-@dataclass
-class PermissionResultAllow:
-    """Allow permission result.
-
-    Indicates that a tool operation is allowed, optionally with modifications.
-    """
-
-    behavior: Literal["allow"] = "allow"
-    updated_input: dict[str, Any] | None = None
-    updated_permissions: list[PermissionUpdate] | None = None
-
-
-@dataclass
-class PermissionResultDeny:
-    """Deny permission result.
-
-    Indicates that a tool operation is denied.
-    """
-
-    behavior: Literal["deny"] = "deny"
-    message: str = ""
-    interrupt: bool = False
-
-
-# Union type for permission results
-PermissionResult = PermissionResultAllow | PermissionResultDeny
+# Permission results - using protocol models with backward compatible aliases
+PermissionResultAllow = PermissionResponseAllow
+PermissionResultDeny = PermissionResponseDeny
+PermissionResult = PermissionResponseAllow | PermissionResponseDeny
 
 # Tool permission callback type
 CanUseTool = Callable[
@@ -274,14 +196,14 @@ CanUseTool = Callable[
 # Hook System Types
 # =============================================================================
 
-# Hook event types
+# Hook event types - re-export from config
 HookEvent = (
-    Literal["PreToolUse"]
-    | Literal["PostToolUse"]
-    | Literal["UserPromptSubmit"]
-    | Literal["Stop"]
-    | Literal["SubagentStop"]
-    | Literal["PreCompact"]
+    Literal[ConfigHookEvent.PRE_TOOL_USE]
+    | Literal[ConfigHookEvent.POST_TOOL_USE]
+    | Literal[ConfigHookEvent.USER_PROMPT_SUBMIT]
+    | Literal[ConfigHookEvent.STOP]
+    | Literal[ConfigHookEvent.SUBAGENT_STOP]
+    | Literal[ConfigHookEvent.PRE_COMPACT]
 )
 
 
@@ -426,33 +348,8 @@ HookCallback = Callable[
 ]
 
 
-@dataclass
-class HookMatcher:
-    """Hook matcher configuration.
-
-    Defines when a hook should be triggered based on tool names or patterns.
-    This is a dataclass version for backward compatibility. The protocol module
-    uses a Pydantic model for validation.
-    """
-
-    matcher: str | None = None
-    hooks: list[HookCallback] = field(default_factory=list)
-    timeout: float | None = None
-
-    def to_protocol(self) -> ProtocolHookMatcherConfig:
-        """Convert to the protocol Pydantic model."""
-        return ProtocolHookMatcherConfig(
-            matcher=self.matcher,
-            timeout=self.timeout,
-        )
-
-    @classmethod
-    def from_protocol(cls, protocol_config: ProtocolHookMatcherConfig) -> "HookMatcher":
-        """Create a HookMatcher from the protocol Pydantic model."""
-        return cls(
-            matcher=protocol_config.matcher,
-            timeout=protocol_config.timeout,
-        )
+# Hook matcher - using protocol model with backward compatibility
+HookMatcher = HookMatcherConfig
 
 
 # =============================================================================
@@ -472,8 +369,8 @@ class AgentDefinition:
     model: Literal["sonnet", "opus", "haiku", "inherit"] | None = None
 
 
-# Setting source literal type
-SettingSource = Literal["user", "project", "local"]
+# Setting source literal type - re-export from config
+SettingSource = ConfigSettingSource
 
 
 # =============================================================================
@@ -483,7 +380,7 @@ SettingSource = Literal["user", "project", "local"]
 class McpStdioServerConfig(TypedDict):
     """MCP stdio server configuration."""
 
-    type: NotRequired[Literal["stdio"]]
+    type: NotRequired[Literal[McpConfig.TYPE_STDIO]]
     command: str
     args: NotRequired[list[str]]
     env: NotRequired[dict[str, str]]
@@ -492,7 +389,7 @@ class McpStdioServerConfig(TypedDict):
 class McpSSEServerConfig(TypedDict):
     """MCP SSE server configuration."""
 
-    type: Literal["sse"]
+    type: Literal[McpConfig.TYPE_SSE]
     url: str
     headers: NotRequired[dict[str, str]]
 
@@ -500,7 +397,7 @@ class McpSSEServerConfig(TypedDict):
 class McpHttpServerConfig(TypedDict):
     """MCP HTTP server configuration."""
 
-    type: Literal["http"]
+    type: Literal[McpConfig.TYPE_HTTP]
     url: str
     headers: NotRequired[dict[str, str]]
 
@@ -512,7 +409,7 @@ class McpSdkServerConfig(TypedDict):
     defined for API compatibility.
     """
 
-    type: Literal["sdk"]
+    type: Literal[McpConfig.TYPE_SDK]
     name: str
     instance: Any  # MCP Server instance
 
@@ -534,8 +431,8 @@ class SdkPluginConfig(TypedDict):
     path: str
 
 
-# Beta features
-SdkBeta = Literal["context-1m-2025-08-07"]
+# Beta features - re-export from config
+SdkBeta = Literal[ConfigSdkBeta.CONTEXT_1M]
 
 
 # =============================================================================
@@ -642,15 +539,11 @@ AssistantMessageError = Literal[
 # Transport Abstract Base Class
 # =============================================================================
 
-from abc import ABC, abstractmethod
-
 
 class Transport(ABC):
     """Abstract base class for transport implementations.
 
     Transport defines how the SDK communicates with the underlying service.
-    Ripperdoc doesn't use subprocess transport like other SDKs, but
-    this class is provided for API compatibility.
     """
 
     @abstractmethod

@@ -8,6 +8,7 @@ It uses anyio for cross-event-loop compatibility and clean async patterns.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable
@@ -15,7 +16,20 @@ from typing import Any
 
 import anyio
 
-from ripperdoc_agent_sdk._errors import MessageParseError
+from ripperdoc_agent_sdk._errors import (
+    ControlResponseError,
+    ControlTimeoutError,
+    InvalidMessageError,
+    MessageParseError,
+    MessageProcessingError,
+    QueueError,
+    RipperdocSDKError,
+    StreamClosedError,
+    StreamError,
+    TransportClosedError,
+    TransportError,
+    TransportReadError,
+)
 from ripperdoc_agent_sdk._internal.transport import Transport
 from ripperdoc_agent_sdk._internal import message_parser
 from ripperdoc_agent_sdk.types import (
@@ -35,6 +49,7 @@ from ripperdoc_agent_sdk.protocol import (
     ControlRewindFilesRequest,
     model_to_dict,
 )
+from ripperdoc_agent_sdk.config import QueueConfig, QueryConfig
 from pydantic import BaseModel
 
 from .queue_manager import MessageQueueManager
@@ -85,7 +100,7 @@ class Query:
         # Message stream (using anyio memory object stream)
         self._message_send, self._message_receive = anyio.create_memory_object_stream[
             dict[str, Any]
-        ](max_buffer_size=100)
+        ](max_buffer_size=QueueConfig.MESSAGE_SEND_BUFFER_SIZE)
 
         # Task group for concurrent operations
         self._tg: anyio.TaskGroup | None = None
@@ -139,8 +154,8 @@ class Query:
         if to_legacy_stream and message is not None:
             try:
                 await self._message_send.send(message)
-            except Exception:
-                # Stream might be closed
+            except (anyio.ClosedResourceError, anyio.BrokenResourceError):
+                # Stream might be closed - expected
                 pass
 
     async def _read_messages(self) -> None:
@@ -169,16 +184,45 @@ class Query:
                         if msg_type == "result":
                             self._stream_manager.mark_first_result()
 
-            logger.debug(f"[read_messages] Transport stream ended after {message_count} messages")
+            logger.debug(f"[_read_messages] Transport stream ended after {message_count} messages")
 
-        except Exception as e:
-            logger.error(f"Error in _read_messages: {e}")
+        except (TransportReadError, TransportClosedError) as e:
+            # Transport-specific errors
+            logger.error(f"Transport error in _read_messages: {e}")
+            error_message = {"type": "error", "error": f"Transport error: {e}"}
+            if not self._closed and not self._stream_manager.is_closed:
+                await self._broadcast_message(error_message)
+        except (InvalidMessageError, MessageParseError) as e:
+            # Message parsing errors
+            logger.error(f"Message parsing error in _read_messages: {e}")
+            error_message = {"type": "error", "error": f"Invalid message: {e}"}
+            if not self._closed and not self._stream_manager.is_closed:
+                await self._broadcast_message(error_message)
+        except (QueueError, StreamClosedError) as e:
+            # Queue/stream errors - these are expected during shutdown
+            logger.debug(f"Queue/stream error in _read_messages (expected during shutdown): {e}")
+        except (OSError, anyio.ClosedResourceError) as e:
+            # Resource cleanup errors - expected during shutdown
+            logger.debug(f"Resource closed in _read_messages: {e}")
+        except RipperdocSDKError as e:
+            # Other SDK errors
+            logger.error(f"SDK error in _read_messages: {e}")
             error_message = {"type": "error", "error": str(e)}
+            if not self._closed and not self._stream_manager.is_closed:
+                await self._broadcast_message(error_message)
+        except (asyncio.CancelledError, anyio.get_cancelled_exc_class()):
+            # Task cancellation - expected during shutdown
+            logger.debug("[_read_messages] Task cancelled")
+            raise
+        except Exception as e:
+            # Unexpected errors - should not happen in normal operation
+            logger.exception("[_read_messages] Unexpected error")
+            error_message = {"type": "error", "error": f"Internal error: {e}"}
             if not self._closed and not self._stream_manager.is_closed:
                 await self._broadcast_message(error_message)
 
         finally:
-            logger.debug("[read_messages] Message reading loop ended")
+            logger.debug(f"[_read_messages] Message reading loop ended after {message_count} messages")
             # Note: We don't close _message_send here because it may still be used
             # for sending messages. It will be closed in the close() method.
             await self._queue_manager.close_all()
@@ -222,7 +266,7 @@ class Query:
             Exception: If the request results in an error.
         """
         self._request_counter += 1
-        request_id = f"req_{self._request_counter}"
+        request_id = f"{QueryConfig.REQUEST_ID_PREFIX}{self._request_counter}"
 
         # Convert Pydantic model to dict if needed
         if isinstance(request, BaseModel):
@@ -389,8 +433,19 @@ class Query:
             # After all messages sent (and result received if needed), end input
             if hasattr(self.transport, 'end_input'):
                 await self.transport.end_input()
+        except (TransportClosedError, TransportReadError, TransportError) as e:
+            # Transport-specific errors
+            logger.debug(f"Transport error streaming input: {e}")
+        except (StreamClosedError, StreamError) as e:
+            # Stream-specific errors
+            logger.debug(f"Stream error streaming input: {e}")
+        except (asyncio.CancelledError, anyio.get_cancelled_exc_class()):
+            # Task cancellation - expected during shutdown
+            logger.debug("[stream_input] Task cancelled")
+            raise
         except Exception as e:
-            logger.debug(f"Error streaming input: {e}")
+            # Unexpected errors - should not happen in normal operation
+            logger.exception("[stream_input] Unexpected error")
 
     # Hook callback management
     @property
@@ -461,8 +516,8 @@ class Query:
         if hasattr(self.transport, 'end_input'):
             try:
                 await self.transport.end_input()
-            except Exception:
-                pass  # Ignore errors during shutdown
+            except (TransportError, anyio.ClosedResourceError):
+                pass  # Ignore expected errors during shutdown
 
         # Close message stream
         await self._message_send.aclose()

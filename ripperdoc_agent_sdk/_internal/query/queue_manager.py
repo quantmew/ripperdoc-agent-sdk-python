@@ -12,14 +12,10 @@ from typing import Any
 
 import anyio
 
+from ripperdoc_agent_sdk._errors import QueueError, RipperdocSDKError
+from ripperdoc_agent_sdk.config import QueueConfig, FieldNameMapping, QueryConfig
+
 logger = logging.getLogger(__name__)
-
-
-# Field name mapping for converting Python-safe names to CLI format
-_FIELD_NAME_MAPPING = {
-    "async_": "async",
-    "continue_": "continue",
-}
 
 
 def convert_hook_output_for_cli(hook_output: dict[str, Any]) -> dict[str, Any]:
@@ -34,10 +30,7 @@ def convert_hook_output_for_cli(hook_output: dict[str, Any]) -> dict[str, Any]:
     Returns:
         Dictionary with CLI-expected field names.
     """
-    return {
-        _FIELD_NAME_MAPPING.get(k, k): v
-        for k, v in hook_output.items()
-    }
+    return FieldNameMapping.to_cli(hook_output)
 
 
 class MessageQueueManager:
@@ -73,7 +66,7 @@ class MessageQueueManager:
             The unique queue ID assigned to this queue.
         """
         self._request_counter += 1
-        queue_id = f"recv_{self._request_counter}"
+        queue_id = f"{QueryConfig.QUEUE_ID_PREFIX}{self._request_counter}"
         self._queues[queue_id] = queue_send
         logger.debug(
             f"[MessageQueueManager] Registered queue {queue_id}, "
@@ -120,10 +113,16 @@ class MessageQueueManager:
             try:
                 await queue_send.send(message)
                 logger.debug(f"[MessageQueueManager] Sent to queue {queue_id}")
-            except Exception as e:
-                # Queue is closed or error occurred, remove it
+            except (anyio.ClosedResourceError, anyio.BrokenResourceError) as e:
+                # Expected queue closure errors
                 logger.debug(
                     f"[MessageQueueManager] Queue {queue_id} closed, removing: {e}"
+                )
+                self._queues.pop(queue_id, None)
+            except Exception as e:
+                # Unexpected errors - log with stack trace
+                logger.exception(
+                    f"[MessageQueueManager] Unexpected error for queue {queue_id}"
                 )
                 self._queues.pop(queue_id, None)
 
@@ -142,30 +141,35 @@ class MessageQueueManager:
                 # Send end of stream marker
                 await queue_send.send(None)
                 logger.debug(f"[MessageQueueManager] Sent None to queue {queue_id}")
-            except Exception:
-                # Queue might already be closed
+            except (anyio.ClosedResourceError, anyio.BrokenResourceError):
+                # Queue might already be closed - expected
                 pass
             finally:
                 # Always close the queue send stream
                 try:
                     await queue_send.aclose()
-                except Exception:
+                except (anyio.ClosedResourceError, anyio.BrokenResourceError):
+                    # Already closed - expected
                     pass
 
         self._queues.clear()
 
     def create_queue_pair(
         self,
-        max_buffer_size: int = 1000,
+        max_buffer_size: int | None = None,
     ) -> tuple[str, anyio.MemoryObjectStreamSend[Any], anyio.MemoryObjectStreamReceive[Any]]:
         """Create a new queue pair and register it.
 
         Args:
             max_buffer_size: Maximum buffer size for the queue.
+                If None, uses the default from QueueConfig.
 
         Returns:
             A tuple of (queue_id, send_stream, receive_stream).
         """
+        if max_buffer_size is None:
+            max_buffer_size = QueueConfig.DEFAULT_BUFFER_SIZE
+
         queue_send, queue_receive = anyio.create_memory_object_stream[
             dict[str, Any] | None
         ](max_buffer_size=max_buffer_size)

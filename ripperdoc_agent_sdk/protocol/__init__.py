@@ -3,9 +3,13 @@
 This module defines type-safe models for all JSON messages exchanged
 over the stdio protocol, replacing raw dictionary construction with
 validated, self-documenting Pydantic models.
+
+All models extend HybridModel for dataclass-like compatibility.
 """
 
 from ripperdoc_agent_sdk.protocol.models import (
+    # Base
+    HybridModel,
     # Content Blocks
     ContentBlock,
     TextContentBlock,
@@ -57,6 +61,8 @@ from ripperdoc_agent_sdk.protocol.models import (
 )
 
 __all__ = [
+    # Base
+    "HybridModel",
     # Content Blocks
     "ContentBlock",
     "TextContentBlock",

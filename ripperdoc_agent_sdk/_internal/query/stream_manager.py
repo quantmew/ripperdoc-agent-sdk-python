@@ -8,17 +8,13 @@ communication.
 from __future__ import annotations
 
 import logging
-import os
-from typing import Final
 
 import anyio
 
+from ripperdoc_agent_sdk._errors import RipperdocSDKError, StreamError, StreamTimeoutError
+from ripperdoc_agent_sdk.config import StreamConfig
+
 logger = logging.getLogger(__name__)
-
-
-# Configuration constants
-DEFAULT_STREAM_CLOSE_TIMEOUT_MS: Final = 60000
-ENV_STREAM_CLOSE_TIMEOUT_KEY: Final = "RIPPERDOC_STREAM_CLOSE_TIMEOUT"
 
 
 class StreamManager:
@@ -41,13 +37,7 @@ class StreamManager:
                 If None, uses default from environment or built-in default.
         """
         if stream_close_timeout is None:
-            timeout_ms = float(
-                os.environ.get(
-                    ENV_STREAM_CLOSE_TIMEOUT_KEY,
-                    DEFAULT_STREAM_CLOSE_TIMEOUT_MS,
-                )
-            )
-            stream_close_timeout = timeout_ms / 1000.0  # Convert ms to seconds
+            stream_close_timeout = StreamConfig.get_close_timeout()
 
         self._stream_close_timeout = stream_close_timeout
         self._first_result_event = anyio.Event()
@@ -85,6 +75,9 @@ class StreamManager:
 
         Returns:
             True if first result was received, False if timeout occurred.
+
+        Raises:
+            StreamTimeoutError: If timeout occurs and raise_on_timeout is True.
         """
         timeout = timeout if timeout is not None else self._stream_close_timeout
 
@@ -94,14 +87,20 @@ class StreamManager:
         )
 
         try:
-            with anyio.move_on_after(timeout):
+            with anyio.move_on_after(timeout) as scope:
                 await self._first_result_event.wait()
-                logger.debug("[StreamManager] First result received")
-                return True
-        except Exception:
-            logger.debug("[StreamManager] Timed out waiting for first result")
+                if not scope.cancel_called:
+                    logger.debug("[StreamManager] First result received")
+                    return True
 
-        return False
+            # Timeout occurred
+            logger.debug("[StreamManager] Timed out waiting for first result")
+            return False
+
+        except anyio.get_cancelled_exc_class():
+            # Task cancellation - expected during shutdown
+            logger.debug("[StreamManager] Cancelled while waiting for first result")
+            raise
 
     def reset(self) -> None:
         """Reset the stream manager state.
@@ -115,6 +114,4 @@ class StreamManager:
 
 __all__ = [
     "StreamManager",
-    "DEFAULT_STREAM_CLOSE_TIMEOUT_MS",
-    "ENV_STREAM_CLOSE_TIMEOUT_KEY",
 ]

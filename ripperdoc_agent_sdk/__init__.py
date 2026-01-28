@@ -49,7 +49,6 @@ from ripperdoc_agent_sdk.client import (
     HookMatcher,
     McpServerConfig,
     PermissionMode,
-    PermissionModeCompat,
     SettingSource,
     StderrCallback,
     clear_programmatic_registries,
@@ -189,7 +188,6 @@ __all__ = [
     "ToolResultBlock",
     # Types - Permissions
     "PermissionMode",
-    "PermissionModeCompat",
     "McpServerConfig",
     "PermissionUpdate",
     "PermissionResult",

@@ -39,8 +39,6 @@ from ripperdoc_agent_sdk.types import (
     ThinkingBlock,
     ToolUseBlock,
     ToolResultBlock,
-    PermissionMode as TypedPermissionMode,
-    SettingSource as TypedSettingSource,
     McpServerConfig as TypedMcpServerConfig,
     AgentDefinition as TypedAgentDefinition,
     HookMatcher as TypedHookMatcher,
@@ -66,30 +64,15 @@ from ripperdoc_agent_sdk.protocol import (
     ControlQueryRequest,
     model_to_dict,
 )
+from ripperdoc_agent_sdk.config import (
+    PermissionMode,
+    SettingSource,
+    ClientConfig,
+)
 
 # Subprocess mode imports (lazy loaded to avoid circular imports)
 _subprocess_transport = None
 _query_class = None
-
-
-# PermissionMode: Use Literal type
-# This is a type alias, not a class
-PermissionMode = TypedPermissionMode
-
-# Helper class for backward compatibility with code that uses PermissionMode.DEFAULT
-class _PermissionModeCompat:
-    """Compatibility class for PermissionMode enum-like access.
-
-    Deprecated: Use string literals directly instead.
-    Example: Use "default" instead of PermissionMode.DEFAULT
-    """
-    DEFAULT = "default"
-    ACCEPT_EDITS = "acceptEdits"
-    BYPASS_PERMISSIONS = "bypassPermissions"
-    PLAN = "plan"
-
-# For backward compatibility, create an enum-like object
-PermissionModeCompat = _PermissionModeCompat()
 
 
 @dataclass
@@ -278,25 +261,6 @@ class HookMatcher:
 StderrCallback = Callable[[str], None]
 
 
-class SettingSource(str, Enum):
-    """Sources for loading settings configuration.
-
-    Controls which settings files are loaded during session initialization.
-
-    Deprecated: Use string literals directly.
-    Example: Use "user" instead of SettingSource.USER
-    """
-
-    USER = "user"        # ~/.ripperdoc/settings.json
-    PROJECT = "project"  # .ripperdoc/settings.json in project
-    LOCAL = "local"      # .ripperdoc.local/settings.json
-    ENV = "env"          # Environment variables
-
-
-# Use TypedSettingSource for SDK compatibility
-SettingSourceType = TypedSettingSource
-
-
 _END_OF_STREAM = object()
 
 
@@ -344,11 +308,11 @@ class RipperdocAgentOptions:
     tools: Optional[Sequence[Any]] = None
     allowed_tools: Optional[Sequence[str]] = None
     disallowed_tools: Optional[Sequence[str]] = None
-    permission_mode: PermissionMode = "default"  # Use string literal for SDK compatibility
+    permission_mode: PermissionMode = PermissionMode.DEFAULT
     verbose: bool = False
-    model: str = "main"
-    max_thinking_tokens: int = 0
-    max_turns: Optional[int] = None
+    model: str = ClientConfig.DEFAULT_MODEL
+    max_thinking_tokens: int = ClientConfig.DEFAULT_MAX_THINKING_TOKENS
+    max_turns: Optional[int] = ClientConfig.DEFAULT_MAX_TURNS
     context: Dict[str, str] = field(default_factory=dict)
     system_prompt: Optional[str] = None
     additional_instructions: Optional[Union[str, Sequence[str]]] = None
@@ -381,8 +345,8 @@ class RipperdocAgentOptions:
     max_buffer_size: Optional[int] = None
     # CLI path for subprocess mode
     cli_path: Optional[str] = None
-    # Query timeout in seconds (default: 300 = 5 minutes)
-    query_timeout: float = 300.0
+    # Query timeout in seconds
+    query_timeout: float = ClientConfig.DEFAULT_QUERY_TIMEOUT
     # Deprecated: use permission_mode instead (kept for backward compatibility)
     yolo_mode: bool = False
     # SDK specific fields (accepted but may not be fully supported)
@@ -398,11 +362,12 @@ class RipperdocAgentOptions:
         # If yolo_mode is explicitly set to True, apply permission_mode
         if self.yolo_mode:
             warnings.warn(
-                "yolo_mode is deprecated, use permission_mode='bypassPermissions' instead",
+                "yolo_mode is deprecated, "
+                f"use permission_mode='{PermissionMode.BYPASS_PERMISSIONS}' instead",
                 DeprecationWarning,
                 stacklevel=3,
             )
-            object.__setattr__(self, "permission_mode", "bypassPermissions")
+            object.__setattr__(self, "permission_mode", PermissionMode.BYPASS_PERMISSIONS)
 
     def extra_instructions(self) -> List[str]:
         """Normalize additional instructions to a list."""
@@ -888,8 +853,11 @@ class RipperdocSDKClient:
                 await client.query("Now implement the fix")
             ```
         """
-        if mode not in ("default", "acceptEdits", "bypassPermissions", "plan"):
-            raise ValueError(f"Invalid permission mode: {mode}")
+        if not PermissionMode.is_valid(mode):
+            raise ValueError(
+                f"Invalid permission mode: {mode}. "
+                f"Valid modes: {PermissionMode.VALID_MODES}"
+            )
 
         self.options.permission_mode = mode
 
@@ -1036,7 +1004,6 @@ __all__ = [
     "HookMatcher",
     "McpServerConfig",
     "PermissionMode",
-    "PermissionModeCompat",
     "SettingSource",
     "StderrCallback",
     "clear_programmatic_registries",
