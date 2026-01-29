@@ -115,6 +115,9 @@ class Query:
         self._message_router: MessageRouter | None = None
         self._closed = False  # For backward compatibility
 
+        # Store the task that enters the task group for proper cleanup
+        self._owner_task: asyncio.Task | None = None
+
     async def start(self) -> None:
         """Start reading messages from transport."""
         if self._tg is None:
@@ -130,6 +133,9 @@ class Query:
                 queue_manager_send=self._queue_manager.broadcast,
                 control_request_handler=self._handle_control_request_wrapper,
             )
+
+            # Store the current task as the owner
+            self._owner_task = asyncio.current_task()
 
             self._tg = anyio.create_task_group()
             await self._tg.__aenter__()
@@ -525,8 +531,28 @@ class Query:
 
         # Close task group if active
         if self._tg:
-            await self._tg.__aexit__(None, None, None)
+            # Cancel the cancel scope to stop all tasks
+            self._tg.cancel_scope.cancel()
+
+            # Check if we're in the same task that entered the task group
+            current_task = asyncio.current_task()
+            if current_task == self._owner_task:
+                # Same task - safe to exit normally
+                try:
+                    await self._tg.__aexit__(None, None, None)
+                except (RuntimeError, anyio.get_cancelled_exc_class()) as e:
+                    logger.debug(f"Task group exit error: {e}")
+            else:
+                # Different task - can't call __aexit__ from here
+                # The tasks are cancelled, and the task group will be cleaned up
+                # when the owner task ends or garbage collection occurs
+                logger.debug(
+                    "Close called from different task than owner; "
+                    "task group will be cleaned up automatically"
+                )
+
             self._tg = None
+            self._owner_task = None
 
 
 # Re-export parse_message for convenience

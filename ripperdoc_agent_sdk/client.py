@@ -980,8 +980,16 @@ async def query(
         try:
             async for msg in client.receive_messages():
                 yield msg
+        except GeneratorExit:
+            # Handle async generator being closed
+            raise
         finally:
-            await client.disconnect()
+            # Safely disconnect with error handling
+            try:
+                await asyncio.wait_for(client.disconnect(), timeout=5.0)
+            except (asyncio.TimeoutError, Exception):
+                # Disconnect failed, but we've done our best cleanup
+                pass
         return
 
     # For simple string prompts, use the original flow
@@ -994,8 +1002,16 @@ async def query(
         async for message in client.receive_messages():
             # receive_messages() already converts to SDK compatible format
             yield message
+    except GeneratorExit:
+        # Handle async generator being closed
+        raise
     finally:
-        await client.disconnect()
+        # Safely disconnect with error handling
+        try:
+            await asyncio.wait_for(client.disconnect(), timeout=5.0)
+        except (asyncio.TimeoutError, Exception):
+            # Disconnect failed, but we've done our best cleanup
+            pass
 
 
 # =============================================================================
