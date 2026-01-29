@@ -366,13 +366,13 @@ class Query:
         try:
             message_count = 0
             async for msg_dict in queue_receive:
+                if msg_dict is None:  # End of stream marker
+                    break
                 message_count += 1
                 logger.debug(
                     f"[_receive_messages_with_queue] {queue_id} received message "
                     f"{message_count}: {msg_dict.get('type')}"
                 )
-                if msg_dict is None:  # End of stream marker
-                    break
                 message = message_parser.parse_message(msg_dict)
                 yield message
             logger.debug(

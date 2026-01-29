@@ -215,11 +215,18 @@ class StdioTransport(Transport):
             raise RuntimeError("Transport not connected")
 
         async def message_generator() -> AsyncIterator[dict[str, Any]]:
-            while True:
-                message = await self._message_queue.get()
-                if message.get("type") == "eof":
-                    break
-                yield message
+            try:
+                while True:
+                    message = await self._message_queue.get()
+                    if message is None or message.get("type") == "eof":
+                        break
+                    yield message
+            except GeneratorExit:
+                # Properly handle generator being closed
+                raise
+            finally:
+                # Cleanup when generator is closed
+                pass
 
         return message_generator()
 
@@ -337,11 +344,18 @@ class InProcessTransport(Transport):
             raise RuntimeError("Transport not connected")
 
         async def message_generator() -> AsyncIterator[dict[str, Any]]:
-            while True:
-                message = await self._message_queue.get()
-                if message.get("type") == "eof":
-                    break
-                yield message
+            try:
+                while True:
+                    message = await self._message_queue.get()
+                    if message is None or message.get("type") == "eof":
+                        break
+                    yield message
+            except GeneratorExit:
+                # Properly handle generator being closed
+                raise
+            finally:
+                # Cleanup when generator is closed
+                pass
 
         return message_generator()
 

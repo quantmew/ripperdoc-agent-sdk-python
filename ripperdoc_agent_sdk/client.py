@@ -762,14 +762,21 @@ class RipperdocSDKClient:
                 # Receive messages from the query's message stream
                 # Use a new iterator for each query
                 message_iterator = self._query.receive_messages()
-                async for message in message_iterator:
-                    self._history.append(message)  # type: ignore[arg-type]
-                    await self._queue.put(message)
+                try:
+                    async for message in message_iterator:
+                        self._history.append(message)  # type: ignore[arg-type]
+                        await self._queue.put(message)
 
-                    # After receiving ResultMessage, stop receiving for this query
-                    # but keep the subprocess running for potential follow-up queries
-                    if isinstance(message, ResultMessage):
-                        break
+                        # After receiving ResultMessage, stop receiving for this query
+                        # but keep the subprocess running for potential follow-up queries
+                        if isinstance(message, ResultMessage):
+                            break
+                except GeneratorExit:
+                    # Properly handle generator being closed
+                    raise
+                finally:
+                    # Ensure the message iterator is properly closed
+                    await message_iterator.aclose()
             finally:
                 await self._queue.put(_END_OF_STREAM)
 
