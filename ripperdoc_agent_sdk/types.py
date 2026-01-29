@@ -374,6 +374,36 @@ SettingSource = ConfigSettingSource
 
 
 # =============================================================================
+# SDK MCP Server Types (In-Process Tools)
+# =============================================================================
+
+from typing import Generic as TypingGeneric, TypeVar
+
+T = TypeVar("T")
+
+
+@dataclass
+class SdkMcpTool(TypingGeneric[T]):
+    """Definition for an SDK MCP tool.
+
+    An SDK MCP tool runs in-process within the Python application,
+    providing better performance than external MCP servers.
+
+    Attributes:
+        name: Unique identifier for the tool (what Claude uses to reference it).
+        description: Human-readable description of what the tool does.
+        input_schema: Schema defining the tool's input parameters.
+            Can be a dict mapping names to types, a TypedDict class, or JSON Schema.
+        handler: Async function that handles tool calls.
+    """
+
+    name: str
+    description: str
+    input_schema: type[T] | dict[str, Any]
+    handler: Callable[[T], Awaitable[dict[str, Any]]]
+
+
+# =============================================================================
 # MCP Server Types
 # =============================================================================
 

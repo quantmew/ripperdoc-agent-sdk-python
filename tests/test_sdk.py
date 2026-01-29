@@ -22,7 +22,7 @@ from ripperdoc_agent_sdk import (
     ResultMessage,
     TextBlock,
 )
-from ripperdoc_agent_sdk.client import McpServerConfig, AgentConfig, HookMatcher, PermissionModeCompat
+from ripperdoc_agent_sdk.client import McpServerConfig, AgentConfig, HookMatcher, PermissionMode
 
 
 class TestSDKImports:
@@ -255,14 +255,22 @@ class TestHookMatcher:
 
 
 class TestPermissionModes:
-    """Test permission mode compatibility."""
+    """Test permission mode."""
 
-    def test_permission_mode_compat(self):
-        """Test PermissionModeCompat class."""
-        assert PermissionModeCompat.DEFAULT == "default"
-        assert PermissionModeCompat.ACCEPT_EDITS == "acceptEdits"
-        assert PermissionModeCompat.BYPASS_PERMISSIONS == "bypassPermissions"
-        assert PermissionModeCompat.PLAN == "plan"
+    def test_permission_mode(self):
+        """Test PermissionMode class."""
+        assert PermissionMode.DEFAULT == "default"
+        assert PermissionMode.ACCEPT_EDITS == "acceptEdits"
+        assert PermissionMode.BYPASS_PERMISSIONS == "bypassPermissions"
+        assert PermissionMode.PLAN == "plan"
+
+    def test_permission_mode_is_valid(self):
+        """Test PermissionMode.is_valid method."""
+        assert PermissionMode.is_valid("default")
+        assert PermissionMode.is_valid("acceptEdits")
+        assert PermissionMode.is_valid("bypassPermissions")
+        assert PermissionMode.is_valid("plan")
+        assert not PermissionMode.is_valid("invalid")
 
 
 class TestRegistries:
