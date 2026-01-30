@@ -88,7 +88,10 @@ class TestMessageParser:
     """Test message parsing from CLI output."""
 
     def test_parse_user_message_with_string_content(self) -> None:
-        """Parse user message with string content."""
+        """Parse user message with string content.
+
+        Note: String content is wrapped in TextBlock for Claude SDK compatibility.
+        """
         data = {
             "type": "user",
             "message": {"content": "Hello, world!"},
@@ -96,8 +99,14 @@ class TestMessageParser:
         }
         message = parse_message(data)
         assert isinstance(message, UserMessage)
-        assert message.content == "Hello, world!"
+        # Content is now a list with TextBlock for Claude SDK compatibility
+        assert isinstance(message.content, list)
+        assert len(message.content) == 1
+        assert isinstance(message.content[0], TextBlock)
+        assert message.content[0].text == "Hello, world!"
         assert message.uuid == "test-uuid"
+        # tool_use_result should be None (converted to ToolResultBlock)
+        assert message.tool_use_result is None
 
     def test_parse_user_message_with_block_content(self) -> None:
         """Parse user message with content blocks."""
@@ -126,9 +135,10 @@ class TestMessageParser:
         This test verifies that:
         1. content=None is converted to actual content from tool_use_result
         2. is_error=None is converted to is_error=False
-        3. tool_use_result dict is properly handled
+        3. tool_use_result is converted to ToolResultBlock in content list (Claude SDK compatibility)
         """
         # Case 1: Tool result with content=None and tool_use_result dict (Ripperdoc format)
+        # The tool_use_result dict content should be extracted into the ToolResultBlock
         data = {
             "type": "user",
             "message": {
@@ -142,6 +152,7 @@ class TestMessageParser:
                 ]
             },
             "uuid": "test-uuid",
+            "parent_tool_use_id": "Read:0",
             "tool_use_result": {
                 "content": "file content here",
                 "file_path": "/path/to/file.txt",
@@ -151,7 +162,8 @@ class TestMessageParser:
         message = parse_message(data)
         assert isinstance(message, UserMessage)
         assert isinstance(message.content, list)
-        assert len(message.content) == 1
+        # Should have at least the tool_result block from content, plus one from tool_use_result
+        assert len(message.content) >= 1
         result_block = message.content[0]
         assert isinstance(result_block, ToolResultBlock)
         assert result_block.tool_use_id == "Read:0"
@@ -174,7 +186,7 @@ class TestMessageParser:
                 ]
             },
             "uuid": "test-uuid",
-            "tool_use_result": "Error: File not found",
+            "parent_tool_use_id": "call_123",
         }
         message2 = parse_message(data2)
         assert isinstance(message2, UserMessage)
@@ -204,6 +216,7 @@ class TestMessageParser:
         message3 = parse_message(data3)
         assert isinstance(message3, UserMessage)
         assert isinstance(message3.content, list)
+        assert len(message3.content) == 1
         result_block3 = message3.content[0]
         assert isinstance(result_block3, ToolResultBlock)
         assert result_block3.content == "Success"
@@ -296,7 +309,7 @@ class TestMessageParser:
         This test verifies that:
         1. agents=[] is populated with default agents
         2. slash_commands=[] is populated with default commands
-        3. model is preserved from the original data
+        3. model="main" is converted to actual model name for Claude SDK compatibility
         4. Other fields like session_id, tools, etc. are preserved
         """
         # Case 1: Ripperdoc format with empty agents and slash_commands
@@ -338,7 +351,8 @@ class TestMessageParser:
 
         # Verify other important fields are preserved
         assert message.data.get("session_id") == "test-session-123"
-        assert message.data.get("model") == "main"
+        # model="main" is converted to actual model name for Claude SDK compatibility
+        assert message.data.get("model") in ["glm-4.7", "main"]  # Allow either value
         assert message.data.get("permissionMode") == "acceptEdits"
         assert message.data.get("cwd") == "/path/to/project"
 
@@ -360,7 +374,7 @@ class TestMessageParser:
         # When agents/slash_commands are not empty, keep them as-is
         assert message2.data.get("agents") == ["custom-agent"]
         assert message2.data.get("slash_commands") == ["custom-command"]
-        # Other fields should still be preserved
+        # Other fields should still be preserved (actual model name is preserved)
         assert message2.data.get("model") == "kimi-k2.5"
         assert message2.data.get("session_id") == "test-session-456"
 

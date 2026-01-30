@@ -34,6 +34,13 @@ class TextContentBlock(ContentBlock):
     type: Literal["text"] = "text"
     text: str
 
+    def __repr__(self) -> str:
+        """Use TextBlock alias for Claude SDK compatibility."""
+        fields = []
+        for name, value in self.model_dump(exclude_none=True).items():
+            fields.append(f"{name}={repr(value)}")
+        return f"TextBlock({', '.join(fields)})"
+
 
 class ThinkingContentBlock(ContentBlock):
     """A thinking/reasoning content block."""
@@ -41,6 +48,13 @@ class ThinkingContentBlock(ContentBlock):
     type: str = Field(default="thinking")
     thinking: str = Field(alias="text")
     signature: Optional[str] = None
+
+    def __repr__(self) -> str:
+        """Use ThinkingBlock alias for Claude SDK compatibility."""
+        fields = []
+        for name, value in self.model_dump(exclude_none=True).items():
+            fields.append(f"{name}={repr(value)}")
+        return f"ThinkingBlock({', '.join(fields)})"
 
 
 class ToolUseContentBlock(ContentBlock):
@@ -51,6 +65,13 @@ class ToolUseContentBlock(ContentBlock):
     name: str
     input: dict[str, Any] = Field(default_factory=dict)
 
+    def __repr__(self) -> str:
+        """Use ToolUseBlock alias for Claude SDK compatibility."""
+        fields = []
+        for name, value in self.model_dump(exclude_none=True).items():
+            fields.append(f"{name}={repr(value)}")
+        return f"ToolUseBlock({', '.join(fields)})"
+
 
 class ToolResultContentBlock(ContentBlock):
     """A tool result content block."""
@@ -59,6 +80,13 @@ class ToolResultContentBlock(ContentBlock):
     tool_use_id: str = Field(default="")
     content: str = Field(default="")
     is_error: Optional[bool] = None
+
+    def __repr__(self) -> str:
+        """Use ToolResultBlock alias for Claude SDK compatibility."""
+        fields = []
+        for name, value in self.model_dump(exclude_none=True).items():
+            fields.append(f"{name}={repr(value)}")
+        return f"ToolResultBlock({', '.join(fields)})"
 
 
 class ImageSource(HybridModel):
@@ -74,6 +102,13 @@ class ImageContentBlock(ContentBlock):
 
     type: str = Field(default="image")
     source: ImageSource
+
+    def __repr__(self) -> str:
+        """Use ImageBlock alias for Claude SDK compatibility."""
+        fields = []
+        for name, value in self.model_dump(exclude_none=True).items():
+            fields.append(f"{name}={repr(value)}")
+        return f"ImageBlock({', '.join(fields)})"
 
 
 # Union type for all content blocks
