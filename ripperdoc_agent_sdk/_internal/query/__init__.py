@@ -385,12 +385,27 @@ class Query:
                 f"[_receive_messages_with_queue] {queue_id} ended after "
                 f"{message_count} messages"
             )
+        except asyncio.CancelledError:
+            # Task is being cancelled - log and propagate for cleanup
+            logger.debug(f"[_receive_messages_with_queue] {queue_id} cancelled")
+            raise
+        except GeneratorExit:
+            # Generator is being closed - expected during cleanup
+            logger.debug(f"[_receive_messages_with_queue] {queue_id} generator closed")
+            raise
         finally:
-            # Clean up
+            # Clean up - suppress errors during cleanup to avoid
+            # "async generator ignored GeneratorExit" errors
             logger.debug(f"[_receive_messages_with_queue] Cleaning up queue {queue_id}")
             self._queue_manager.unregister_queue(queue_id)
-            await queue_send.aclose()
-            await queue_receive.aclose()
+            try:
+                await queue_send.aclose()
+            except (asyncio.CancelledError, anyio.get_cancelled_exc_class()):
+                pass  # Suppressed during cleanup
+            try:
+                await queue_receive.aclose()
+            except (asyncio.CancelledError, anyio.get_cancelled_exc_class()):
+                pass  # Suppressed during cleanup
 
     async def send_message(
         self,

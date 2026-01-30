@@ -788,7 +788,13 @@ class RipperdocSDKClient:
                     raise
                 finally:
                     # Ensure the message iterator is properly closed
-                    await message_iterator.aclose()
+                    # Suppress CancelledError during cleanup to avoid
+                    # "async generator ignored GeneratorExit" errors
+                    try:
+                        await message_iterator.aclose()
+                    except asyncio.CancelledError:
+                        # Task is being cancelled, cleanup will be handled by caller
+                        pass
             finally:
                 await self._queue.put(_END_OF_STREAM)
 

@@ -270,12 +270,20 @@ class MessageAdapter:
             )
 
         elif content_type == "tool_use":
+            # Extract input and ensure it's a dict, not a Pydantic model
+            input_value = getattr(content, "input", {}) or {}
+            if hasattr(input_value, "model_dump"):
+                # Convert Pydantic model to dict
+                input_value = input_value.model_dump()
+            elif not isinstance(input_value, dict):
+                # Convert any other type to dict representation
+                input_value = {"value": str(input_value)}
             return ToolUseBlock(
                 id=getattr(content, "id", "")
                 or getattr(content, "tool_use_id", "")
                 or "",
                 name=getattr(content, "name", ""),
-                input=getattr(content, "input", {}) or {},
+                input=input_value,
             )
 
         elif content_type == "tool_result":
@@ -311,10 +319,18 @@ class MessageAdapter:
             )
 
         elif block_type == "tool_use":
+            # Extract input and ensure it's a dict, not a Pydantic model
+            input_value = d.get("input", {}) or {}
+            if hasattr(input_value, "model_dump"):
+                # Convert Pydantic model to dict
+                input_value = input_value.model_dump()
+            elif not isinstance(input_value, dict):
+                # Convert any other type to dict representation
+                input_value = {"value": str(input_value)}
             return ToolUseBlock(
                 id=d.get("id", "") or d.get("tool_use_id", "") or "",
                 name=d.get("name", ""),
-                input=d.get("input", {}) or {},
+                input=input_value,
             )
 
         elif block_type == "tool_result":
