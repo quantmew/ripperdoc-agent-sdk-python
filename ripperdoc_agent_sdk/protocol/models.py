@@ -9,7 +9,7 @@ All models extend HybridModel for dataclass-like compatibility.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, Optional, Union
 from pydantic import Field, ConfigDict
 
 from ripperdoc_agent_sdk.protocol.base import HybridModel
@@ -40,7 +40,7 @@ class ThinkingContentBlock(ContentBlock):
 
     type: str = Field(default="thinking")
     thinking: str = Field(alias="text")
-    signature: str | None = None
+    signature: Optional[str] = None
 
 
 class ToolUseContentBlock(ContentBlock):
@@ -58,7 +58,7 @@ class ToolResultContentBlock(ContentBlock):
     type: str = Field(default="tool_result")
     tool_use_id: str = Field(default="")
     content: str = Field(default="")
-    is_error: bool | None = None
+    is_error: Optional[bool] = None
 
 
 class ImageSource(HybridModel):
@@ -77,13 +77,13 @@ class ImageContentBlock(ContentBlock):
 
 
 # Union type for all content blocks
-ContentBlockType = (
-    TextContentBlock
-    | ThinkingContentBlock
-    | ToolUseContentBlock
-    | ToolResultContentBlock
-    | ImageContentBlock
-)
+ContentBlockType = Union[
+    TextContentBlock,
+    ThinkingContentBlock,
+    ToolUseContentBlock,
+    ToolResultContentBlock,
+    ImageContentBlock,
+]
 
 
 # ============================================================================
@@ -102,7 +102,7 @@ class MessageData(HybridModel):
 class AssistantMessageData(MessageData):
     """Assistant message data."""
 
-    content: list[dict[str, Any]] | str
+    content: Union[list[dict[str, Any]], str]
     model: str = "main"
 
 
@@ -117,7 +117,7 @@ class AssistantStreamMessage(HybridModel):
 
     type: str = Field(default="assistant")
     message: AssistantMessageData
-    parent_tool_use_id: str | None = None
+    parent_tool_use_id: Optional[str] = None
 
 
 class UserStreamMessage(HybridModel):
@@ -125,13 +125,13 @@ class UserStreamMessage(HybridModel):
 
     type: str = Field(default="user")
     message: UserMessageData
-    uuid: str | None = None
-    parent_tool_use_id: str | None = None
+    uuid: Optional[str] = None
+    parent_tool_use_id: Optional[str] = None
     tool_use_result: Any = None
 
 
 # Union type for stream messages
-StreamMessage = AssistantStreamMessage | UserStreamMessage
+StreamMessage = Union[AssistantStreamMessage, UserStreamMessage]
 
 
 # ============================================================================
@@ -152,7 +152,7 @@ class ControlInitializeRequest(ControlRequestData):
 
     subtype: Literal["initialize"] = "initialize"
     options: dict[str, Any]
-    hooks: dict[str, list[dict[str, Any]]] | None = None
+    hooks: Optional[dict[str, list[dict[str, Any]]]] = None
 
 
 class ControlQueryRequest(ControlRequestData):
@@ -169,8 +169,8 @@ class ControlPermissionRequest(ControlRequestData):
     subtype: Literal["can_use_tool"] = "can_use_tool"
     tool_name: str
     input: dict[str, Any]
-    permission_suggestions: list[dict[str, Any]] | None = None
-    blocked_path: str | None = None
+    permission_suggestions: Optional[list[dict[str, Any]]] = None
+    blocked_path: Optional[str] = None
 
 
 class ControlInterruptRequest(ControlRequestData):
@@ -190,7 +190,7 @@ class ControlSetModelRequest(ControlRequestData):
     """Set model request."""
 
     subtype: Literal["set_model"] = "set_model"
-    model: str | None = None
+    model: Optional[str] = None
 
 
 class ControlRewindFilesRequest(ControlRequestData):
@@ -206,7 +206,7 @@ class ControlHookCallbackRequest(ControlRequestData):
     subtype: Literal["hook_callback"] = "hook_callback"
     callback_id: str
     input: dict[str, Any]
-    tool_use_id: str | None = None
+    tool_use_id: Optional[str] = None
 
 
 class ControlMcpMessageRequest(ControlRequestData):
@@ -222,17 +222,17 @@ class ControlRequestMessage(HybridModel):
 
     type: Literal["control_request"] = "control_request"
     request_id: str
-    request: (
-        ControlInitializeRequest
-        | ControlQueryRequest
-        | ControlPermissionRequest
-        | ControlInterruptRequest
-        | ControlSetPermissionModeRequest
-        | ControlSetModelRequest
-        | ControlRewindFilesRequest
-        | ControlHookCallbackRequest
-        | ControlMcpMessageRequest
-    )
+    request: Union[
+        ControlInitializeRequest,
+        ControlQueryRequest,
+        ControlPermissionRequest,
+        ControlInterruptRequest,
+        ControlSetPermissionModeRequest,
+        ControlSetModelRequest,
+        ControlRewindFilesRequest,
+        ControlHookCallbackRequest,
+        ControlMcpMessageRequest,
+    ]
 
 
 # ============================================================================
@@ -253,7 +253,7 @@ class ControlResponseSuccess(ControlResponseData):
 
     subtype: Literal["success"] = "success"
     request_id: str
-    response: dict[str, Any] | None = None
+    response: Optional[dict[str, Any]] = None
 
 
 class ControlResponseError(ControlResponseData):
@@ -268,7 +268,7 @@ class ControlResponseMessage(HybridModel):
     """A control response message wrapper."""
 
     type: Literal["control_response"] = "control_response"
-    response: ControlResponseSuccess | ControlResponseError
+    response: Union[ControlResponseSuccess, ControlResponseError]
 
 
 # ============================================================================
@@ -299,7 +299,7 @@ class InitializeResponseData(HybridModel):
     mcp_servers: list[MCPServerInfo] = Field(default_factory=list)
     slash_commands: list[Any] = Field(default_factory=list)
     apiKeySource: str = "none"
-    claude_code_version: str = "0.1.0"
+    ripperdoc_version: str = "0.1.0"
     output_style: str = "default"
     agents: list[str] = Field(default_factory=list)
     skills: list[Any] = Field(default_factory=list)
@@ -321,9 +321,9 @@ class ResultMessage(HybridModel):
     is_error: bool
     num_turns: int
     session_id: str
-    total_cost_usd: float | None = None
-    usage: UsageInfo | None = None
-    result: str | None = None
+    total_cost_usd: Optional[float] = None
+    usage: Optional[UsageInfo] = None
+    result: Optional[str] = None
     structured_output: Any = None
 
 
@@ -335,7 +335,7 @@ class PermissionResponseAllow(HybridModel):
     """A permission allow response."""
 
     decision: Literal["allow"] = "allow"
-    updated_input: dict[str, Any] | None = Field(None, alias="updatedInput")
+    updated_input: Optional[dict[str, Any]] = Field(None, alias="updatedInput")
 
 
 class PermissionResponseDeny(HybridModel):
@@ -349,7 +349,7 @@ class PermissionRuleValue(HybridModel):
     """Permission rule value."""
 
     tool_name: str = Field(alias="toolName")
-    rule_content: str | None = Field(None, alias="ruleContent")
+    rule_content: Optional[str] = Field(None, alias="ruleContent")
 
 
 class PermissionUpdate(HybridModel):
@@ -363,13 +363,13 @@ class PermissionUpdate(HybridModel):
         "addDirectories",
         "removeDirectories",
     ]
-    destination: Literal[
+    destination: Optional[Literal[
         "userSettings", "projectSettings", "localSettings", "session"
-    ] | None = None
-    rules: list[PermissionRuleValue] | None = None
-    behavior: Literal["allow", "deny", "ask"] | None = None
-    mode: str | None = None
-    directories: list[str] | None = None
+    ]] = None
+    rules: Optional[list[PermissionRuleValue]] = None
+    behavior: Optional[Literal["allow", "deny", "ask"]] = None
+    mode: Optional[str] = None
+    directories: Optional[list[str]] = None
 
     model_config = ConfigDict(
         extra="allow",
@@ -384,8 +384,8 @@ class PermissionUpdate(HybridModel):
 class HookMatcherConfig(HybridModel):
     """Hook matcher configuration for control protocol."""
 
-    matcher: str | None = None
-    timeout: float | None = None
+    matcher: Optional[str] = None
+    timeout: Optional[float] = None
 
     model_config = ConfigDict(
         extra="allow",

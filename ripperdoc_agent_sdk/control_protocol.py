@@ -8,7 +8,12 @@ compatibility. New code should import directly from ripperdoc_agent_sdk.protocol
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Literal, NotRequired, TypedDict, Union
+from typing import Any, Literal, Optional, TypedDict, Union
+
+try:
+    from typing import NotRequired
+except ImportError:
+    from typing_extensions import NotRequired
 
 # Import Pydantic models from protocol module
 from ripperdoc_agent_sdk.protocol import (
@@ -50,7 +55,7 @@ SDKControlMcpMessageRequest = _ControlMcpMessageRequest
 # Control Response Types (CLI → SDK) - Re-export Pydantic models
 ControlResponseSuccess = _ControlResponseSuccess
 ControlResponseError = _ControlResponseError
-ControlResponse = _ControlResponseSuccess | _ControlResponseError
+ControlResponse = Union[_ControlResponseSuccess, _ControlResponseError]
 
 # Permission and Hook types - Re-export Pydantic models
 PermissionUpdate = _ProtocolPermissionUpdate
@@ -139,7 +144,7 @@ class _SDKControlInitializeRequest(TypedDict):
     """Initialize request - sent when SDK connects to CLI (DEPRECATED - use Pydantic model)."""
     subtype: Literal["initialize"]
     options: dict[str, Any]
-    hooks: dict[str, list[dict[str, Any]]] | None
+    hooks: Optional[dict[str, list[dict[str, Any]]]]
 
 
 class _SDKControlQueryRequest(TypedDict):
@@ -154,8 +159,8 @@ class _SDKControlPermissionRequest(TypedDict):
     subtype: Literal["can_use_tool"]
     tool_name: str
     input: dict[str, Any]
-    permission_suggestions: list[dict[str, Any]] | None
-    blocked_path: str | None
+    permission_suggestions: Optional[list[dict[str, Any]]]
+    blocked_path: Optional[str]
 
 
 class _SDKControlInterruptRequest(TypedDict):
@@ -172,7 +177,7 @@ class _SDKControlSetPermissionModeRequest(TypedDict):
 class _SDKControlSetModelRequest(TypedDict):
     """Set model request (DEPRECATED - use Pydantic model)."""
     subtype: Literal["set_model"]
-    model: str | None
+    model: Optional[str]
 
 
 class _SDKControlRewindFilesRequest(TypedDict):
@@ -186,7 +191,7 @@ class _SDKHookCallbackRequest(TypedDict):
     subtype: Literal["hook_callback"]
     callback_id: str
     input: dict[str, Any]
-    tool_use_id: str | None
+    tool_use_id: Optional[str]
 
 
 class _SDKControlMcpMessageRequest(TypedDict):

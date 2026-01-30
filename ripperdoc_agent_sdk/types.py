@@ -20,9 +20,15 @@ from dataclasses import dataclass, field
 from typing import (
     Any,
     Literal,
-    NotRequired,
+    Optional,
     TypedDict,
+    Union,
 )
+
+try:
+    from typing import NotRequired
+except ImportError:
+    from typing_extensions import NotRequired
 
 # =============================================================================
 # Import Pydantic Models from Protocol Module
@@ -96,10 +102,10 @@ class UserMessage:
     New code should use UserStreamMessage directly from the protocol module.
     """
 
-    content: str | list[ContentBlock]
-    uuid: str | None = None
-    parent_tool_use_id: str | None = None
-    tool_use_result: dict[str, Any] | None = None
+    content: Union[str, list[ContentBlock]]
+    uuid: Optional[str] = None
+    parent_tool_use_id: Optional[str] = None
+    tool_use_result: Optional[dict[str, Any]] = None
 
 
 @dataclass
@@ -112,8 +118,8 @@ class AssistantMessage:
 
     content: list[ContentBlock]
     model: str
-    parent_tool_use_id: str | None = None
-    error: str | None = None
+    parent_tool_use_id: Optional[str] = None
+    error: Optional[str] = None
 
 
 @dataclass
@@ -139,11 +145,11 @@ class StreamEvent:
     uuid: str
     session_id: str
     event: dict[str, Any]
-    parent_tool_use_id: str | None = None
+    parent_tool_use_id: Optional[str] = None
 
 
 # Union type for all message types
-Message = UserMessage | AssistantMessage | SystemMessage | ResultMessage | StreamEvent
+Message = Union[UserMessage, AssistantMessage, SystemMessage, ResultMessage, StreamEvent]
 
 
 # =============================================================================
@@ -176,14 +182,14 @@ class ToolPermissionContext:
     Provides additional context when making permission decisions.
     """
 
-    signal: Any | None = None
+    signal: Optional[Any] = None
     suggestions: list[PermissionUpdate] = field(default_factory=list)
 
 
 # Permission results - using protocol models with backward compatible aliases
 PermissionResultAllow = PermissionResponseAllow
 PermissionResultDeny = PermissionResponseDeny
-PermissionResult = PermissionResponseAllow | PermissionResponseDeny
+PermissionResult = Union[PermissionResponseAllow, PermissionResponseDeny]
 
 # Tool permission callback type
 CanUseTool = Callable[
@@ -196,15 +202,15 @@ CanUseTool = Callable[
 # Hook System Types
 # =============================================================================
 
-# Hook event types - re-export from config
-HookEvent = (
-    Literal[ConfigHookEvent.PRE_TOOL_USE]
-    | Literal[ConfigHookEvent.POST_TOOL_USE]
-    | Literal[ConfigHookEvent.USER_PROMPT_SUBMIT]
-    | Literal[ConfigHookEvent.STOP]
-    | Literal[ConfigHookEvent.SUBAGENT_STOP]
-    | Literal[ConfigHookEvent.PRE_COMPACT]
-)
+# Hook event types - Literal union type matching official SDK
+HookEvent = Union[
+    Literal["PreToolUse"],
+    Literal["PostToolUse"],
+    Literal["UserPromptSubmit"],
+    Literal["Stop"],
+    Literal["SubagentStop"],
+    Literal["PreCompact"],
+]
 
 
 # Base hook input fields
@@ -261,18 +267,18 @@ class PreCompactHookInput(BaseHookInput):
 
     hook_event_name: Literal["PreCompact"]
     trigger: Literal["manual", "auto"]
-    custom_instructions: str | None
+    custom_instructions: Optional[str]
 
 
 # Union type for all hook inputs
-HookInput = (
-    PreToolUseHookInput
-    | PostToolUseHookInput
-    | UserPromptSubmitHookInput
-    | StopHookInput
-    | SubagentStopHookInput
-    | PreCompactHookInput
-)
+HookInput = Union[
+    PreToolUseHookInput,
+    PostToolUseHookInput,
+    UserPromptSubmitHookInput,
+    StopHookInput,
+    SubagentStopHookInput,
+    PreCompactHookInput,
+]
 
 
 # Hook-specific output types
@@ -299,11 +305,11 @@ class UserPromptSubmitHookSpecificOutput(TypedDict):
     additionalContext: NotRequired[str]
 
 
-HookSpecificOutput = (
-    PreToolUseHookSpecificOutput
-    | PostToolUseHookSpecificOutput
-    | UserPromptSubmitHookSpecificOutput
-)
+HookSpecificOutput = Union[
+    PreToolUseHookSpecificOutput,
+    PostToolUseHookSpecificOutput,
+    UserPromptSubmitHookSpecificOutput,
+]
 
 
 # Hook JSON output types
@@ -332,24 +338,42 @@ class SyncHookJSONOutput(TypedDict):
     hookSpecificOutput: NotRequired[HookSpecificOutput]
 
 
-HookJSONOutput = AsyncHookJSONOutput | SyncHookJSONOutput
+HookJSONOutput = Union[AsyncHookJSONOutput, SyncHookJSONOutput]
 
 
 class HookContext(TypedDict):
     """Context information for hook callbacks."""
 
-    signal: Any | None
+    signal: Optional[Any]
 
 
 # Hook callback type
 HookCallback = Callable[
-    [HookInput, str | None, HookContext],
+    [HookInput, Optional[str], HookContext],
     Awaitable[HookJSONOutput],
 ]
 
 
 # Hook matcher - using protocol model with backward compatibility
-HookMatcher = HookMatcherConfig
+# Note: Official SDK uses a dataclass with matcher, hooks, timeout fields
+# We provide backward compatibility through the protocol model
+
+
+@dataclass
+class HookMatcher:
+    """Matcher configuration for hooks.
+
+    Matches official SDK structure for full compatibility.
+
+    Attributes:
+        matcher: Tool name pattern (e.g., "Bash" or "Write|MultiEdit|Edit")
+        hooks: List of hook callbacks
+        timeout: Optional timeout in seconds (default: 60)
+    """
+
+    matcher: Optional[str] = None
+    hooks: list[Callable] = field(default_factory=list)
+    timeout: Optional[float] = None
 
 
 # =============================================================================
@@ -365,8 +389,8 @@ class AgentDefinition:
 
     description: str
     prompt: str
-    tools: list[str] | None = None
-    model: Literal["sonnet", "opus", "haiku", "inherit"] | None = None
+    tools: Optional[list[str]] = None
+    model: Optional[Literal["sonnet", "opus", "haiku", "inherit"]] = None
 
 
 # Setting source literal type - re-export from config
@@ -390,7 +414,7 @@ class SdkMcpTool(TypingGeneric[T]):
     providing better performance than external MCP servers.
 
     Attributes:
-        name: Unique identifier for the tool (what Claude uses to reference it).
+        name: Unique identifier for the tool.
         description: Human-readable description of what the tool does.
         input_schema: Schema defining the tool's input parameters.
             Can be a dict mapping names to types, a TypedDict class, or JSON Schema.
@@ -399,7 +423,7 @@ class SdkMcpTool(TypingGeneric[T]):
 
     name: str
     description: str
-    input_schema: type[T] | dict[str, Any]
+    input_schema: Union[type[T], dict[str, Any]]
     handler: Callable[[T], Awaitable[dict[str, Any]]]
 
 
@@ -445,9 +469,12 @@ class McpSdkServerConfig(TypedDict):
 
 
 # Union type for all MCP server configs
-McpServerConfig = (
-    McpStdioServerConfig | McpSSEServerConfig | McpHttpServerConfig | McpSdkServerConfig
-)
+McpServerConfig = Union[
+    McpStdioServerConfig,
+    McpSSEServerConfig,
+    McpHttpServerConfig,
+    McpSdkServerConfig,
+]
 
 
 # =============================================================================
@@ -461,8 +488,8 @@ class SdkPluginConfig(TypedDict):
     path: str
 
 
-# Beta features - re-export from config
-SdkBeta = Literal[ConfigSdkBeta.CONTEXT_1M]
+# Beta features - Literal type matching official SDK
+SdkBeta = Literal["context-1m-2025-08-07"]
 
 
 # =============================================================================

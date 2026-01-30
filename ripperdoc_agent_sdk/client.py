@@ -52,17 +52,14 @@ from ripperdoc_agent_sdk.types import (
     SandboxSettings,
     SystemPromptPreset,
     ToolsPreset,
+    HookEvent,
+    SdkPluginConfig,
+    HookMatcher,
 )
 
-from ripperdoc_agent_sdk.adapter import (
-    MessageAdapter,
-    AsyncMessageAdapter,
-    ResultMessageFactory,
-)
 from ripperdoc_agent_sdk.protocol import (
     ControlInitializeRequest,
     ControlQueryRequest,
-    model_to_dict,
 )
 from ripperdoc_agent_sdk.config import (
     PermissionMode,
@@ -270,41 +267,9 @@ class RipperdocAgentOptions:
 
     This is the main options class for configuring Ripperdoc SDK behavior.
     It provides SDK configuration options.
-
-    Attributes:
-        tools: Custom tools to use instead of defaults.
-        allowed_tools: List of tool names to allow (whitelist).
-        disallowed_tools: List of tool names to disallow (blacklist).
-        permission_mode: Permission mode for operations. Defaults to DEFAULT.
-        verbose: Enable verbose output.
-        model: Model pointer to use. Defaults to "main".
-        max_thinking_tokens: Maximum tokens for thinking (0 = disabled).
-        max_turns: Maximum conversation turns before stopping. None = unlimited.
-        context: Additional context dictionary.
-        system_prompt: Custom system prompt (overrides default).
-        additional_instructions: Extra instructions to append to system prompt.
-        permission_checker: Custom function to check tool permissions.
-        cwd: Working directory for the session.
-        resume: Session ID to resume from.
-        continue_conversation: Continue the most recent conversation.
-        mcp_servers: Programmatic MCP server configurations.
-        agents: Programmatic subagent definitions (keyed by agent type name).
-        hooks: Programmatic hook callbacks (keyed by event name).
-        env: Environment variables to pass to subprocesses.
-        additional_directories: Extra directories the agent can access.
-        include_partial_messages: Include partial message events during streaming.
-        stderr: Callback for stderr output from subprocesses.
-        fork_session: Create a new session branch when resuming.
-        setting_sources: Which settings sources to load (user, project, local, env).
-        user: User identifier for the session.
-        permission_prompt_tool_name: MCP tool name for permission prompts.
-        settings: Path to custom settings file.
-        extra_args: Additional arguments to pass through.
-        max_buffer_size: Maximum buffer size for streaming responses.
-        cli_path: Path to the Ripperdoc CLI executable.
-        query_timeout: Timeout in seconds for the query (default: 300 = 5 minutes).
     """
 
+    # Core options
     tools: Optional[Sequence[Any]] = None
     allowed_tools: Optional[Sequence[str]] = None
     disallowed_tools: Optional[Sequence[str]] = None
@@ -314,28 +279,45 @@ class RipperdocAgentOptions:
     max_thinking_tokens: int = ClientConfig.DEFAULT_MAX_THINKING_TOKENS
     max_turns: Optional[int] = ClientConfig.DEFAULT_MAX_TURNS
     context: Dict[str, str] = field(default_factory=dict)
-    system_prompt: Optional[str] = None
+    system_prompt: Optional[Union[str, SystemPromptPreset]] = None
     additional_instructions: Optional[Union[str, Sequence[str]]] = None
+
+    # Tool permission - can_use_tool for SDK compatibility
+    can_use_tool: Optional[CanUseTool] = None
+    # permission_checker for backward compatibility with Ripperdoc
     permission_checker: Optional[Callable] = None
-    cwd: Optional[Union[str, Path]] = None
+
     # Session management
+    cwd: Optional[Union[str, Path]] = None
     resume: Optional[str] = None
     continue_conversation: bool = False
     fork_session: bool = False
-    # MCP configuration
-    mcp_servers: Optional[Dict[str, McpServerConfig]] = None
+
+    # MCP configuration - supports dict, str, or Path for SDK compatibility
+    mcp_servers: Optional[Union[Dict[str, McpServerConfig], str, Path]] = None
+
     # Programmatic agents (key = agent type name)
-    agents: Optional[Dict[str, AgentConfig]] = None
-    # Programmatic hooks (key = event name like "PreToolUse", "PostToolUse", etc.)
-    hooks: Optional[Dict[str, List[HookMatcher]]] = None
+    agents: Optional[Dict[str, Union[AgentConfig, TypedAgentDefinition]]] = None
+
+    # Programmatic hooks - typed as dict[HookEvent, list[HookMatcher]] for SDK compatibility
+    hooks: Optional[Dict[HookEvent, List[Union[HookMatcher, TypedHookMatcher]]]] = None
+
     # Environment variables for subprocesses
     env: Optional[Dict[str, str]] = None
-    # Additional directories the agent can access
-    additional_directories: Optional[List[str]] = None
+
+    # Additional directories - add_dirs for SDK compatibility
+    add_dirs: Optional[List[Union[str, Path]]] = None
+    # additional_directories for backward compatibility
+    additional_directories: Optional[List[Union[str, Path]]] = None
+
     # Include partial messages during streaming
     include_partial_messages: bool = False
+
     # Stderr callback for subprocess output
     stderr: Optional[StderrCallback] = None
+    # debug_stderr for SDK compatibility (deprecated)
+    debug_stderr: Any = None
+
     # Low priority options
     setting_sources: Optional[List[SettingSource]] = None
     user: Optional[str] = None
@@ -343,22 +325,35 @@ class RipperdocAgentOptions:
     settings: Optional[Union[str, Path]] = None
     extra_args: Optional[Dict[str, Optional[str]]] = None
     max_buffer_size: Optional[int] = None
+
     # CLI path for subprocess mode
-    cli_path: Optional[str] = None
+    cli_path: Optional[Union[str, Path]] = None
+
     # Query timeout in seconds
     query_timeout: float = ClientConfig.DEFAULT_QUERY_TIMEOUT
+
     # Deprecated: use permission_mode instead (kept for backward compatibility)
     yolo_mode: bool = False
+
     # SDK specific fields (accepted but may not be fully supported)
     max_budget_usd: Optional[float] = None
     fallback_model: Optional[str] = None
-    betas: List[str] = field(default_factory=list)
-    sandbox: Optional[Dict[str, Any]] = None
+    # betas as list[SdkBeta] for SDK compatibility
+    betas: List[SdkBeta] = field(default_factory=list)
+    sandbox: Optional[Union[SandboxSettings, Dict[str, Any]]] = None
     enable_file_checkpointing: bool = False
     output_format: Optional[Dict[str, Any]] = None
 
+    # Plugins for SDK compatibility
+    plugins: List[SdkPluginConfig] = field(default_factory=list)
+
+    # Tools preset for SDK compatibility
+    tools_preset: Optional[ToolsPreset] = None
+
     def __post_init__(self) -> None:
         """Handle deprecated yolo_mode parameter and validate permission_mode."""
+        import sys
+
         # Validate permission_mode
         if not PermissionMode.is_valid(self.permission_mode):
             raise ValueError(
@@ -376,6 +371,16 @@ class RipperdocAgentOptions:
             )
             object.__setattr__(self, "permission_mode", PermissionMode.BYPASS_PERMISSIONS)
 
+        # Set debug_stderr to sys.stderr if not provided
+        if self.debug_stderr is None:
+            object.__setattr__(self, "debug_stderr", sys.stderr)
+
+        # Normalize add_dirs from additional_directories if not provided
+        if self.add_dirs is None and self.additional_directories is not None:
+            object.__setattr__(self, "add_dirs", self.additional_directories)
+        elif self.additional_directories is None and self.add_dirs is not None:
+            object.__setattr__(self, "additional_directories", self.add_dirs)
+
     def extra_instructions(self) -> List[str]:
         """Normalize additional instructions to a list."""
         if self.additional_instructions is None:
@@ -383,6 +388,13 @@ class RipperdocAgentOptions:
         if isinstance(self.additional_instructions, str):
             return [self.additional_instructions]
         return [text for text in self.additional_instructions if text]
+
+    @property
+    def tools_value(self) -> Optional[Union[Sequence[str], ToolsPreset]]:
+        """Get tools value for SDK compatibility."""
+        if self.tools_preset is not None:
+            return self.tools_preset
+        return self.tools
 
 
 # Module-level registries for programmatic agents and hooks

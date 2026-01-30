@@ -1,7 +1,6 @@
 """Message parser for Ripperdoc SDK subprocess architecture.
 
 This module parses JSON messages from the CLI into typed Message objects.
-It uses Python's match/case for clean pattern matching.
 """
 
 import logging
@@ -75,8 +74,6 @@ def _normalize_init_message(data: dict[str, Any]) -> dict[str, Any]:
 def parse_message(data: dict[str, Any]) -> Message:
     """Parse message from CLI output into typed Message objects.
 
-    Uses Python's match/case for clean pattern matching.
-
     Args:
         data: Raw message dictionary from CLI output
 
@@ -96,213 +93,211 @@ def parse_message(data: dict[str, Any]) -> Message:
     if not message_type:
         raise MessageParseError("Message missing 'type' field", data)
 
-    match message_type:
-        case "user":
-            try:
-                parent_tool_use_id = data.get("parent_tool_use_id")
-                tool_use_result = data.get("tool_use_result")
-                uuid = data.get("uuid")
+    # Use if-elif instead of match/case for Python 3.9 compatibility
+    if message_type == "user":
+        try:
+            parent_tool_use_id = data.get("parent_tool_use_id")
+            tool_use_result = data.get("tool_use_result")
+            uuid = data.get("uuid")
 
-                # Parse content blocks
-                content = data.get("message", {}).get("content", "")
-                if isinstance(content, list):
-                    content_blocks: list[ContentBlock] = []
-                    for block in content:
-                        block_type = block.get("type")
-                        match block_type:
-                            case "text":
-                                content_blocks.append(
-                                    TextBlock(text=block.get("text", ""))
-                                )
-                            case "tool_use":
-                                content_blocks.append(
-                                    ToolUseBlock(
-                                        id=block.get("id", ""),
-                                        name=block.get("name", ""),
-                                        input=block.get("input", {}) or {},
-                                    )
-                                )
-                            case "tool_result":
-                                # Normalize tool_result block to match SDK behavior:
-                                # - content should contain the actual content (not None)
-                                # - is_error should be a boolean (not None)
-                                tool_result_block = block
-                                tool_result_id = tool_result_block.get("tool_use_id", "")
-                                result_content = tool_result_block.get("content")
-                                result_is_error = tool_result_block.get("is_error")
+            # Parse content blocks
+            content = data.get("message", {}).get("content", "")
+            if isinstance(content, list):
+                content_blocks: list[ContentBlock] = []
+                for block in content:
+                    block_type = block.get("type")
+                    if block_type == "text":
+                        content_blocks.append(
+                            TextBlock(text=block.get("text", ""))
+                        )
+                    elif block_type == "tool_use":
+                        content_blocks.append(
+                            ToolUseBlock(
+                                id=block.get("id", ""),
+                                name=block.get("name", ""),
+                                input=block.get("input", {}) or {},
+                            )
+                        )
+                    elif block_type == "tool_result":
+                        # Normalize tool_result block to match SDK behavior:
+                        # - content should contain the actual content (not None)
+                        # - is_error should be a boolean (not None)
+                        tool_result_block = block
+                        tool_result_id = tool_result_block.get("tool_use_id", "")
+                        result_content = tool_result_block.get("content")
+                        result_is_error = tool_result_block.get("is_error")
 
-                                # If content is None, try to extract from tool_use_result dict
-                                if result_content is None and tool_use_result:
-                                    if isinstance(tool_use_result, dict):
-                                        # Extract content from tool_use_result dict
-                                        result_content = tool_use_result.get("content") or tool_use_result.get("result")
-                                    else:
-                                        result_content = str(tool_use_result)
+                        # If content is None, try to extract from tool_use_result dict
+                        if result_content is None and tool_use_result:
+                            if isinstance(tool_use_result, dict):
+                                # Extract content from tool_use_result dict
+                                result_content = tool_use_result.get("content") or tool_use_result.get("result")
+                            else:
+                                result_content = str(tool_use_result)
 
-                                # Convert is_error=None to is_error=False for SDK compatibility
-                                if result_is_error is None:
-                                    result_is_error = False
+                        # Convert is_error=None to is_error=False for SDK compatibility
+                        if result_is_error is None:
+                            result_is_error = False
 
-                                content_blocks.append(
-                                    ToolResultBlock(
-                                        tool_use_id=tool_result_id,
-                                        content=result_content,
-                                        is_error=result_is_error,
-                                    )
-                                )
-                            case _:
-                                logger.warning(f"Unknown content block type: {block_type}")
+                        content_blocks.append(
+                            ToolResultBlock(
+                                tool_use_id=tool_result_id,
+                                content=result_content,
+                                is_error=result_is_error,
+                            )
+                        )
+                    else:
+                        logger.warning(f"Unknown content block type: {block_type}")
 
-                    return UserMessage(
-                        content=content_blocks if content_blocks else content,
-                        uuid=uuid,
-                        parent_tool_use_id=parent_tool_use_id,
-                        tool_use_result=tool_use_result,
+                return UserMessage(
+                    content=content_blocks if content_blocks else content,
+                    uuid=uuid,
+                    parent_tool_use_id=parent_tool_use_id,
+                    tool_use_result=tool_use_result,
+                )
+            else:
+                # String content
+                return UserMessage(
+                    content=content,
+                    uuid=uuid,
+                    parent_tool_use_id=parent_tool_use_id,
+                    tool_use_result=tool_use_result,
+                )
+
+        except KeyError as e:
+            raise MessageParseError(
+                f"Missing required field in user message: {e}", data
+            ) from e
+
+    elif message_type == "assistant":
+        try:
+            content_blocks: list[ContentBlock] = []
+            for block in data.get("message", {}).get("content", []):
+                block_type = block.get("type")
+                if block_type == "text":
+                    content_blocks.append(
+                        TextBlock(text=block.get("text", ""))
+                    )
+                elif block_type == "thinking":
+                    content_blocks.append(
+                        ThinkingBlock(
+                            thinking=block.get("thinking", ""),
+                            signature=block.get("signature", ""),
+                        )
+                    )
+                elif block_type == "tool_use":
+                    content_blocks.append(
+                        ToolUseBlock(
+                            id=block.get("id", ""),
+                            name=block.get("name", ""),
+                            input=block.get("input", {}) or {},
+                        )
+                    )
+                elif block_type == "tool_result":
+                    # Normalize tool_result block to match SDK behavior
+                    result_content = block.get("content")
+                    result_is_error = block.get("is_error")
+
+                    # Convert is_error=None to is_error=False for SDK compatibility
+                    if result_is_error is None:
+                        result_is_error = False
+
+                    content_blocks.append(
+                        ToolResultBlock(
+                            tool_use_id=block.get("tool_use_id", ""),
+                            content=result_content,
+                            is_error=result_is_error,
+                        )
                     )
                 else:
-                    # String content
-                    return UserMessage(
-                        content=content,
-                        uuid=uuid,
-                        parent_tool_use_id=parent_tool_use_id,
-                        tool_use_result=tool_use_result,
-                    )
+                    logger.warning(f"Unknown content block type: {block_type}")
 
-            except KeyError as e:
-                raise MessageParseError(
-                    f"Missing required field in user message: {e}", data
-                ) from e
-
-        case "assistant":
-            try:
-                content_blocks: list[ContentBlock] = []
-                for block in data.get("message", {}).get("content", []):
-                    block_type = block.get("type")
-                    match block_type:
-                        case "text":
-                            content_blocks.append(
-                                TextBlock(text=block.get("text", ""))
-                            )
-                        case "thinking":
-                            content_blocks.append(
-                                ThinkingBlock(
-                                    thinking=block.get("thinking", ""),
-                                    signature=block.get("signature", ""),
-                                )
-                            )
-                        case "tool_use":
-                            content_blocks.append(
-                                ToolUseBlock(
-                                    id=block.get("id", ""),
-                                    name=block.get("name", ""),
-                                    input=block.get("input", {}) or {},
-                                )
-                            )
-                        case "tool_result":
-                            # Normalize tool_result block to match SDK behavior
-                            result_content = block.get("content")
-                            result_is_error = block.get("is_error")
-
-                            # Convert is_error=None to is_error=False for SDK compatibility
-                            if result_is_error is None:
-                                result_is_error = False
-
-                            content_blocks.append(
-                                ToolResultBlock(
-                                    tool_use_id=block.get("tool_use_id", ""),
-                                    content=result_content,
-                                    is_error=result_is_error,
-                                )
-                            )
-                        case _:
-                            logger.warning(f"Unknown content block type: {block_type}")
-
-                return AssistantMessage(
-                    content=content_blocks,
-                    model=data.get("message", {}).get("model", ""),
-                    parent_tool_use_id=data.get("parent_tool_use_id"),
-                    error=data.get("message", {}).get("error"),
-                )
-
-            except KeyError as e:
-                raise MessageParseError(
-                    f"Missing required field in assistant message: {e}", data
-                ) from e
-
-        case "progress":
-            # Progress messages
-            return SystemMessage(
-                subtype="progress",
-                data={
-                    "tool_use_id": data.get("tool_use_id", ""),
-                    "content": data.get("content"),
-                },
+            return AssistantMessage(
+                content=content_blocks,
+                model=data.get("message", {}).get("model", ""),
+                parent_tool_use_id=data.get("parent_tool_use_id"),
+                error=data.get("message", {}).get("error"),
             )
 
-        case "result":
-            try:
-                return ResultMessage(
-                    subtype=data.get("subtype", "result"),
-                    duration_ms=data.get("duration_ms", 0),
-                    duration_api_ms=data.get("duration_api_ms", 0),
-                    is_error=data.get("is_error", False),
-                    num_turns=data.get("num_turns", 0),
-                    session_id=data.get("session_id", ""),
-                    total_cost_usd=data.get("total_cost_usd"),
-                    usage=data.get("usage"),
-                    result=data.get("result"),
-                    structured_output=data.get("structured_output"),
-                )
-            except KeyError as e:
-                raise MessageParseError(
-                    f"Missing required field in result message: {e}", data
-                ) from e
+        except KeyError as e:
+            raise MessageParseError(
+                f"Missing required field in assistant message: {e}", data
+            ) from e
 
-        case "system":
-            try:
-                subtype = data.get("subtype", "")
-                # Normalize init message data for SDK compatibility
-                if subtype == "init":
-                    normalized_data = _normalize_init_message(data)
-                    return SystemMessage(
-                        subtype=subtype,
-                        data=normalized_data,
-                    )
+    elif message_type == "progress":
+        # Progress messages
+        return SystemMessage(
+            subtype="progress",
+            data={
+                "tool_use_id": data.get("tool_use_id", ""),
+                "content": data.get("content"),
+            },
+        )
+
+    elif message_type == "result":
+        try:
+            return ResultMessage(
+                subtype=data.get("subtype", "result"),
+                duration_ms=data.get("duration_ms", 0),
+                duration_api_ms=data.get("duration_api_ms", 0),
+                is_error=data.get("is_error", False),
+                num_turns=data.get("num_turns", 0),
+                session_id=data.get("session_id", ""),
+                total_cost_usd=data.get("total_cost_usd"),
+                usage=data.get("usage"),
+                result=data.get("result"),
+                structured_output=data.get("structured_output"),
+            )
+        except KeyError as e:
+            raise MessageParseError(
+                f"Missing required field in result message: {e}", data
+            ) from e
+
+    elif message_type == "system":
+        try:
+            subtype = data.get("subtype", "")
+            # Normalize init message data for SDK compatibility
+            if subtype == "init":
+                normalized_data = _normalize_init_message(data)
                 return SystemMessage(
                     subtype=subtype,
-                    data=data,
+                    data=normalized_data,
                 )
-            except KeyError as e:
-                raise MessageParseError(
-                    f"Missing required field in system message: {e}", data
-                ) from e
-
-        case "stream_event":
-            try:
-                return StreamEvent(
-                    uuid=data["uuid"],
-                    session_id=data["session_id"],
-                    event=data["event"],
-                    parent_tool_use_id=data.get("parent_tool_use_id"),
-                )
-            except KeyError as e:
-                raise MessageParseError(
-                    f"Missing required field in stream_event message: {e}", data
-                ) from e
-
-        case "error":
-            # Error message from the CLI
-            error_text = data.get("error", "Unknown error")
             return SystemMessage(
-                subtype="error",
-                data={
-                    "error": error_text,
-                    "exit_code": data.get("exit_code"),
-                },
+                subtype=subtype,
+                data=data,
             )
+        except KeyError as e:
+            raise MessageParseError(
+                f"Missing required field in system message: {e}", data
+            ) from e
 
-        case _:
-            raise MessageParseError(f"Unknown message type: {message_type}", data)
+    elif message_type == "stream_event":
+        try:
+            return StreamEvent(
+                uuid=data["uuid"],
+                session_id=data["session_id"],
+                event=data["event"],
+                parent_tool_use_id=data.get("parent_tool_use_id"),
+            )
+        except KeyError as e:
+            raise MessageParseError(
+                f"Missing required field in stream_event message: {e}", data
+            ) from e
+
+    elif message_type == "error":
+        # Error message from the CLI
+        error_text = data.get("error", "Unknown error")
+        return SystemMessage(
+            subtype="error",
+            data={
+                "error": error_text,
+                "exit_code": data.get("exit_code"),
+            },
+        )
+
+    else:
+        raise MessageParseError(f"Unknown message type: {message_type}", data)
 
 
 __all__ = ["parse_message"]

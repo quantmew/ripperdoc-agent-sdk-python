@@ -54,7 +54,7 @@ SDK MCP Server Support:
 """
 
 from collections.abc import Awaitable, Callable
-from typing import Any, Dict
+from typing import Any, Dict, Optional, Union
 
 from ripperdoc_agent_sdk.client import (
     # Core client and options
@@ -132,6 +132,7 @@ from ripperdoc_agent_sdk.types import (
     PreCompactHookInput,
     HookJSONOutput,
     HookEvent,
+    HookMatcher as TypedHookMatcher,
     # Agent support
     AgentDefinition,
     # MCP Server Support
@@ -139,6 +140,8 @@ from ripperdoc_agent_sdk.types import (
     SdkMcpTool,
     # Beta support
     SdkBeta,
+    # Plugin support
+    SdkPluginConfig,
     # Sandbox support
     SandboxSettings,
     # System prompt types
@@ -163,7 +166,7 @@ from ripperdoc_agent_sdk.types import (
 
 
 def tool(
-    name: str, description: str, input_schema: type | dict[str, Any]
+    name: str, description: str, input_schema: Union[type, dict[str, Any]]
 ) -> Callable[[Callable[[Any], Awaitable[dict[str, Any]]]], SdkMcpTool[Any]]:
     """Decorator for defining MCP tools with type safety.
 
@@ -172,10 +175,8 @@ def tool(
     than external MCP servers.
 
     Args:
-        name: Unique identifier for the tool. This is what Claude will use
-            to reference the tool in function calls.
+        name: Unique identifier for the tool.
         description: Human-readable description of what the tool does.
-            This helps Claude understand when to use the tool.
         input_schema: Schema defining the tool's input parameters.
             Can be either:
             - A dictionary mapping parameter names to types (e.g., {"text": str})
@@ -226,7 +227,7 @@ def tool(
 
 
 def create_sdk_mcp_server(
-    name: str, version: str = "1.0.0", tools: list[SdkMcpTool[Any]] | None = None
+    name: str, version: str = "1.0.0", tools: Optional[list[SdkMcpTool[Any]]] = None
 ) -> TypedMcpServerConfig:
     """Create an in-process MCP server that runs within your Python application.
 
@@ -243,7 +244,6 @@ def create_sdk_mcp_server(
         version: Server version string. Defaults to "1.0.0". This is for
             informational purposes and doesn't affect functionality.
         tools: List of SdkMcpTool instances created with the @tool decorator.
-            These are the functions that Claude can call through this server.
             If None or empty, the server will have no tools (rarely useful).
 
     Returns:
@@ -473,6 +473,7 @@ __all__ = [
     "SettingSource",
     # Types - Beta and Plugins
     "SdkBeta",
+    "SdkPluginConfig",
     # Types - Sandbox
     "SandboxSettings",
     # Types - System Prompt
