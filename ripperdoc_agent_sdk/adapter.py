@@ -287,11 +287,15 @@ class MessageAdapter:
             )
 
         elif content_type == "tool_result":
+            # Get content, ensuring it's never None (Claude SDK requires str)
+            content_value = getattr(content, "text", None)
+            if content_value is None:
+                content_value = ""
             return ToolResultBlock(
                 tool_use_id=getattr(content, "tool_use_id", "")
                 or getattr(content, "id", "")
                 or "",
-                content=getattr(content, "text", None),
+                content=content_value,
                 is_error=getattr(content, "is_error", None),
             )
 
@@ -334,9 +338,13 @@ class MessageAdapter:
             )
 
         elif block_type == "tool_result":
+            # Get content, ensuring it's never None (Claude SDK requires str)
+            content_value = d.get("text", None) or d.get("content", None)
+            if content_value is None:
+                content_value = ""
             return ToolResultBlock(
                 tool_use_id=d.get("tool_use_id", "") or d.get("id", "") or "",
-                content=d.get("text", None) or d.get("content", None),
+                content=content_value,
                 is_error=d.get("is_error", None),
             )
 

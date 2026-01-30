@@ -153,7 +153,16 @@ class MessageParser:
                     result_content = tool_use_result["error"]
                     result_is_error = True
                 else:
+                    # Convert entire tool_use_result to string as fallback
                     result_content = str(tool_use_result)
+
+            # DEBUG: Log if result_content is still None after all processing
+            if result_content is None:
+                logger.warning(f"result_content is None after processing tool_use_result={tool_use_result}")
+
+            # Ensure result_content is never None (Pydantic requires str)
+            if result_content is None:
+                result_content = ""
 
             if result_is_error is None:
                 result_is_error = False
@@ -204,6 +213,10 @@ class MessageParser:
                 # Normalize tool_result block to match SDK behavior
                 result_content = block.get("content")
                 result_is_error = block.get("is_error")
+
+                # Convert None to empty string for SDK compatibility
+                if result_content is None:
+                    result_content = ""
 
                 # Convert is_error=None to is_error=False for SDK compatibility
                 if result_is_error is None:
