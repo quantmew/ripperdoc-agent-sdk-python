@@ -528,7 +528,13 @@ class Query:
         await self._send_control_request(request)
 
     async def close(self) -> None:
-        """Close the query and clean up resources."""
+        """Close the query and clean up resources.
+
+        This method ensures proper cleanup of all resources including:
+        - Transport stdin/stdout streams
+        - Message streams
+        - Task group with proper cancellation waiting
+        """
         self._closed = True
         self._stream_manager.mark_closed()
 
@@ -541,29 +547,56 @@ class Query:
                 pass  # Ignore expected errors during shutdown
 
         # Close message stream
-        await self._message_send.aclose()
-        await self._message_receive.aclose()
+        try:
+            await self._message_send.aclose()
+        except (anyio.ClosedResourceError, anyio.BrokenResourceError):
+            pass  # Already closed
+        try:
+            await self._message_receive.aclose()
+        except (anyio.ClosedResourceError, anyio.BrokenResourceError):
+            pass  # Already closed
 
         # Close task group if active
         if self._tg:
+            # Store reference before cleanup
+            tg = self._tg
+            owner_task = self._owner_task
+
             # Cancel the cancel scope to stop all tasks
-            self._tg.cancel_scope.cancel()
+            tg.cancel_scope.cancel()
 
             # Check if we're in the same task that entered the task group
             current_task = asyncio.current_task()
-            if current_task == self._owner_task:
+            if current_task == owner_task:
                 # Same task - safe to exit normally
+                # Add timeout to prevent hanging if cleanup takes too long
                 try:
-                    await self._tg.__aexit__(None, None, None)
+                    with anyio.move_on_after(5.0) as cleanup_scope:
+                        await tg.__aexit__(None, None, None)
+
+                    if cleanup_scope.cancel_called:
+                        logger.debug(
+                            "Task group cleanup timed out after 5s; "
+                            "tasks will be cancelled when the event loop ends"
+                        )
                 except (RuntimeError, anyio.get_cancelled_exc_class()) as e:
                     logger.debug(f"Task group exit error: {e}")
             else:
                 # Different task - can't call __aexit__ from here
-                # The tasks are cancelled, and the task group will be cleaned up
-                # when the owner task ends or garbage collection occurs
+                # Wait a bit for tasks to clean up naturally
                 logger.debug(
                     "Close called from different task than owner; "
-                    "task group will be cleaned up automatically"
+                    "waiting for task group cleanup..."
+                )
+                try:
+                    with anyio.move_on_after(2.0):
+                        # Give tasks time to notice cancellation
+                        await asyncio.sleep(0.1)
+                except Exception:
+                    pass
+
+                logger.debug(
+                    "Task group will be fully cleaned up when owner task ends"
                 )
 
             self._tg = None

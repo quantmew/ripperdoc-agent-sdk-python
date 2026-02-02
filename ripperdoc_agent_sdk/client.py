@@ -8,6 +8,7 @@ The SDK supports subprocess communication mode with JSON Control Protocol over s
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import warnings
 from collections.abc import AsyncIterable
@@ -70,6 +71,9 @@ from ripperdoc_agent_sdk.config import (
 # Subprocess mode imports (lazy loaded to avoid circular imports)
 _subprocess_transport = None
 _query_class = None
+
+# Logger for this module
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -697,27 +701,63 @@ class RipperdocSDKClient:
         return hooks_dict
 
     async def disconnect(self) -> None:
-        """Close the subprocess connection and clean up resources."""
-        # Close query and transport
+        """Close the subprocess connection and clean up resources.
+
+        This method ensures proper cleanup with timeout handling:
+        - Closes query and waits for task group cleanup
+        - Closes transport and subprocess
+        - Cancels any running tasks
+        - Restores working directory
+        """
+        import anyio
+
+        # Close query first - this stops message reading and closes streams
         if self._query:
-            await self._query.close()
-            self._query = None
+            try:
+                # Add timeout to prevent hanging during cleanup
+                with anyio.move_on_after(3.0) as scope:
+                    await self._query.close()
+
+                if scope.cancel_called:
+                    logger.debug("Query close timed out, proceeding with transport close")
+            except (anyio.get_cancelled_exc_class(), asyncio.CancelledError):
+                # Suppress cancellation errors during disconnect
+                logger.debug("Query close cancelled, proceeding with cleanup")
+            except Exception as e:
+                logger.debug(f"Query close error: {e}, proceeding with transport close")
+            finally:
+                self._query = None
+
+        # Close transport - this terminates the subprocess
         if self._transport:
-            await self._transport.close()
-            self._transport = None
+            try:
+                with anyio.move_on_after(2.0) as scope:
+                    await self._transport.close()
+
+                if scope.cancel_called:
+                    logger.debug("Transport close timed out")
+            except Exception as e:
+                logger.debug(f"Transport close error: {e}")
+            finally:
+                self._transport = None
 
         # Cancel current task if running
         if self._current_task and not self._current_task.done():
             self._current_task.cancel()
             try:
-                await self._current_task
-            except asyncio.CancelledError:
-                pass
+                with anyio.move_on_after(1.0):
+                    await self._current_task
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass  # Expected during cleanup
 
         # Restore working directory
         if self._previous_cwd:
-            os.chdir(self._previous_cwd)
-            self._previous_cwd = None
+            try:
+                os.chdir(self._previous_cwd)
+            except Exception as e:
+                logger.debug(f"Failed to restore working directory: {e}")
+            finally:
+                self._previous_cwd = None
 
         self._connected = False
 
@@ -1003,11 +1043,14 @@ async def query(
             raise
         finally:
             # Safely disconnect with error handling
+            import anyio
             try:
-                await asyncio.wait_for(client.disconnect(), timeout=5.0)
-            except (asyncio.TimeoutError, Exception):
-                # Disconnect failed, but we've done our best cleanup
-                pass
+                with anyio.move_on_after(3.0):
+                    await client.disconnect()
+            except (asyncio.CancelledError, anyio.get_cancelled_exc_class()):
+                pass  # Suppress cancellation errors during disconnect
+            except Exception:
+                pass  # Other exceptions - logged but not raised
         return
 
     # For simple string prompts, use the original flow
@@ -1025,10 +1068,18 @@ async def query(
         raise
     finally:
         # Safely disconnect with error handling
+        # Use anyio for consistent timeout behavior across event loops
+        import anyio
         try:
-            await asyncio.wait_for(client.disconnect(), timeout=5.0)
-        except (asyncio.TimeoutError, Exception):
-            # Disconnect failed, but we've done our best cleanup
+            with anyio.move_on_after(3.0):
+                await client.disconnect()
+        except (asyncio.CancelledError, anyio.get_cancelled_exc_class()):
+            # Suppress cancellation errors during disconnect
+            # The disconnect() method handles cleanup internally
+            pass
+        except Exception:
+            # Other exceptions - logged but not raised
+            # We've done our best cleanup
             pass
 
 
