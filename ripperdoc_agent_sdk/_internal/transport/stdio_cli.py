@@ -73,7 +73,7 @@ class SubprocessCLITransport(Transport):
                      object or a dict (to avoid circular imports).
         """
         self._prompt = prompt
-        self._is_streaming = not isinstance(prompt, str) or prompt == ""
+        self._is_streaming = not isinstance(prompt, str)
 
         # Convert options to dict for uniform access
         if isinstance(options, dict):
@@ -89,7 +89,13 @@ class SubprocessCLITransport(Transport):
                 'system_prompt': getattr(options, 'system_prompt', None),
                 'env': getattr(options, 'env', {}),
                 'stderr': getattr(options, 'stderr', None),
+                'debug_stderr': getattr(options, 'debug_stderr', None),
                 'max_buffer_size': getattr(options, 'max_buffer_size', None),
+                'permission_prompt_tool_name': getattr(options, 'permission_prompt_tool_name', None),
+                'include_partial_messages': getattr(options, 'include_partial_messages', False),
+                'fork_session': getattr(options, 'fork_session', False),
+                'output_format': getattr(options, 'output_format', None),
+                'extra_args': getattr(options, 'extra_args', {}) or {},
             }
 
         # Find CLI path
@@ -230,6 +236,14 @@ class SubprocessCLITransport(Transport):
                 if schema:
                     cmd.extend(["--json-schema", json.dumps(schema)])
 
+        # Add extra args (future CLI flags)
+        extra_args = self._options.get('extra_args') or {}
+        for flag, value in extra_args.items():
+            if value is None:
+                cmd.append(f"--{flag}")
+            else:
+                cmd.extend([f"--{flag}", str(value)])
+
         # Handle streaming vs string mode
         if self._is_streaming:
             cmd.extend(["--input-format", "stream-json"])
@@ -263,12 +277,19 @@ class SubprocessCLITransport(Transport):
                 "RIPPERDOC_ENTRYPOINT": "sdk-py-stdio",
             }
 
+            extra_args = self._options.get('extra_args') or {}
+            should_pipe_stderr = (
+                self._options.get('stderr') is not None
+                or "debug-to-stderr" in extra_args
+            )
+            stderr_dest = subprocess.PIPE if should_pipe_stderr else None
+
             # Start the process
             self._process = await anyio.open_process(
                 cmd,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stderr=stderr_dest,
                 cwd=self._cwd,
                 env=process_env,
             )
@@ -277,8 +298,8 @@ class SubprocessCLITransport(Transport):
             if self._process.stdout:
                 self._stdout_stream = TextReceiveStream(self._process.stdout)
 
-            # Setup stderr stream
-            if self._process.stderr:
+            # Setup stderr stream if piped
+            if should_pipe_stderr and self._process.stderr:
                 self._stderr_stream = TextReceiveStream(self._process.stderr)
                 self._stderr_task = asyncio.create_task(self._handle_stderr())
 
@@ -325,6 +346,14 @@ class SubprocessCLITransport(Transport):
                 stderr_callback = self._options.get('stderr')
                 if stderr_callback:
                     stderr_callback(line_str)
+
+                extra_args = self._options.get('extra_args') or {}
+                if "debug-to-stderr" in extra_args:
+                    debug_stderr = self._options.get('debug_stderr')
+                    if debug_stderr:
+                        debug_stderr.write(line_str + "\n")
+                        if hasattr(debug_stderr, "flush"):
+                            debug_stderr.flush()
 
                 logger.debug(f"[CLI stderr] {line_str}")
 

@@ -11,7 +11,8 @@ import asyncio
 import os
 import warnings
 from collections.abc import AsyncIterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+import json
 from enum import Enum
 from pathlib import Path
 from typing import (
@@ -482,34 +483,89 @@ class RipperdocSDKClient:
         # Convert options to typed dict format for transport
         self._transport_options = self._build_transport_options()
 
-    def _build_transport_options(self) -> Any:
+    def _configure_options_for_permissions(
+        self,
+        prompt: Optional[Union[str, AsyncIterable[dict[str, Any]]]],
+    ) -> "RipperdocAgentOptions":
+        """Validate can_use_tool settings and return configured options.
+
+        Mirrors claude-agent-sdk behavior:
+        - can_use_tool requires streaming mode (no direct string prompt)
+        - can_use_tool and permission_prompt_tool_name are mutually exclusive
+        - permission_prompt_tool_name is set to \"stdio\" when can_use_tool is used
+        """
+        if not self.options.can_use_tool:
+            return self.options
+
+        if isinstance(prompt, str):
+            raise ValueError(
+                "can_use_tool callback requires streaming mode. "
+                "Please provide prompt as an AsyncIterable instead of a string."
+            )
+
+        if self.options.permission_prompt_tool_name:
+            raise ValueError(
+                "can_use_tool callback cannot be used with permission_prompt_tool_name. "
+                "Please use one or the other."
+            )
+
+        return replace(self.options, permission_prompt_tool_name="stdio")
+
+    def _build_transport_options(self, options: Optional["RipperdocAgentOptions"] = None) -> Any:
         """Build options dict for SubprocessCLITransport."""
+        if options is None:
+            options = self.options
         # Build the options dict
         options_dict = {
-            "cli_path": self.options.cli_path,
-            "model": self.options.model or "main",
-            "permission_mode": self.options.permission_mode,
-            "max_turns": self.options.max_turns,
-            "system_prompt": self.options.system_prompt,
-            "cwd": str(self.options.cwd) if self.options.cwd else None,
-            "allowed_tools": list(self.options.allowed_tools) if self.options.allowed_tools else None,
-            "disallowed_tools": list(self.options.disallowed_tools) if self.options.disallowed_tools else None,
-            "env": self.options.env or {},
-            "stderr": self.options.stderr,
-            "max_buffer_size": self.options.max_buffer_size,
+            "cli_path": options.cli_path,
+            "model": options.model or "main",
+            "permission_mode": options.permission_mode,
+            "max_turns": options.max_turns,
+            "system_prompt": options.system_prompt,
+            "cwd": str(options.cwd) if options.cwd else None,
+            "allowed_tools": list(options.allowed_tools) if options.allowed_tools else None,
+            "disallowed_tools": list(options.disallowed_tools) if options.disallowed_tools else None,
+            "env": options.env or {},
+            "stderr": options.stderr,
+            "max_buffer_size": options.max_buffer_size,
+            "debug_stderr": options.debug_stderr,
+            "permission_prompt_tool_name": options.permission_prompt_tool_name,
+            "include_partial_messages": options.include_partial_messages,
+            "fork_session": options.fork_session,
+            "settings": options.settings,
+            "add_dirs": options.add_dirs,
+            "user": options.user,
+            "extra_args": options.extra_args,
             # SDK compatibility fields (passed but may be ignored)
-            "max_budget_usd": self.options.max_budget_usd,
-            "fallback_model": self.options.fallback_model,
-            "betas": self.options.betas,
-            "sandbox": self.options.sandbox,
-            "enable_file_checkpointing": self.options.enable_file_checkpointing,
-            "output_format": self.options.output_format,
+            "max_budget_usd": options.max_budget_usd,
+            "fallback_model": options.fallback_model,
+            "betas": options.betas,
+            "sandbox": options.sandbox,
+            "enable_file_checkpointing": options.enable_file_checkpointing,
+            "output_format": options.output_format,
+            "plugins": options.plugins,
         }
 
         # Remove None values
         options_dict = {k: v for k, v in options_dict.items() if v is not None}
 
         return options_dict
+
+    def _build_init_options(self, options_dict: dict[str, Any]) -> dict[str, Any]:
+        """Build JSON-serializable options payload for initialize control request."""
+        init_options = dict(options_dict)
+        # Drop non-serializable runtime fields
+        init_options.pop("stderr", None)
+        init_options.pop("debug_stderr", None)
+
+        # Remove any remaining non-JSON-serializable values
+        for key in list(init_options.keys()):
+            try:
+                json.dumps(init_options[key])
+            except (TypeError, ValueError):
+                init_options.pop(key, None)
+
+        return init_options
 
     @property
     def history(self) -> List[Any]:
@@ -539,28 +595,34 @@ class RipperdocSDKClient:
 
     async def connect(
         self,
-        prompt: Optional[str] = None
+        prompt: Optional[Union[str, AsyncIterable[dict[str, Any]]]] = None
     ) -> None:
         """Connect to the CLI subprocess and initialize the session.
 
         Args:
             prompt: Optional prompt to send after connecting.
         """
+        configured_options = self._configure_options_for_permissions(prompt)
         if not self._connected:
             # Change working directory if specified
-            if self.options.cwd is not None:
+            if configured_options.cwd is not None:
                 self._previous_cwd = Path.cwd()
-                os.chdir(_coerce_to_path(self.options.cwd))
+                os.chdir(_coerce_to_path(configured_options.cwd))
 
             # Initialize subprocess connection
-            await self._connect_subprocess()
+            prompt_stream = prompt if isinstance(prompt, AsyncIterable) else None
+            await self._connect_subprocess(configured_options, prompt_stream)
 
             self._connected = True
 
-        if prompt:
+        if isinstance(prompt, str) and prompt:
             await self.query(prompt)
 
-    async def _connect_subprocess(self) -> None:
+    async def _connect_subprocess(
+        self,
+        options: "RipperdocAgentOptions",
+        prompt_stream: Optional[AsyncIterable[dict[str, Any]]] = None,
+    ) -> None:
         """Initialize subprocess mode connection.
 
         Creates the SubprocessCLITransport and Query instances,
@@ -570,11 +632,17 @@ class RipperdocSDKClient:
             raise RuntimeError("Subprocess components not initialized")
 
         # Build options dict for transport (avoids circular imports)
-        options_dict = self._build_transport_options()
+        options_dict = self._build_transport_options(options)
+
+        async def _empty_stream() -> AsyncIterator[dict[str, Any]]:
+            return
+            yield {}  # type: ignore[unreachable]
+
+        transport_prompt = prompt_stream if prompt_stream is not None else _empty_stream()
 
         # Create the transport with dict options
         self._transport = _subprocess_transport(
-            prompt="",  # Empty prompt for streaming mode
+            prompt=transport_prompt,  # Streaming mode uses async iterable
             options=options_dict,  # Pass dict directly, transport accepts both dict and object
         )
 
@@ -587,16 +655,21 @@ class RipperdocSDKClient:
             is_streaming_mode=True,
             can_use_tool=self._build_permission_checker(),
             hooks=self._build_hooks_dict(),
-            sdk_mcp_servers=self.options.mcp_servers,
+            sdk_mcp_servers=options.mcp_servers,
         )
 
         # Start the query's message reading task
         await self._query.start()
 
+        # If we have a prompt stream, start streaming it
+        if prompt_stream is not None and self._query._tg:
+            self._query._tg.start_soon(self._query.stream_input, prompt_stream)
+
         # Send initialize request
         try:
+            init_options = self._build_init_options(options_dict)
             init_request = ControlInitializeRequest(
-                options=options_dict,
+                options=init_options,
                 hooks=self._build_hooks_dict(),
             )
             init_response = await self._query._send_control_request(
@@ -638,6 +711,21 @@ class RipperdocSDKClient:
         if self.options.permission_mode == "bypassPermissions":
             return None
 
+        # Prefer can_use_tool (Claude SDK compatible). Fall back to legacy permission_checker.
+        can_use_tool_cb = self.options.can_use_tool
+        legacy_checker = self.options.permission_checker
+
+        if not can_use_tool_cb and not legacy_checker:
+            # No callback provided; allow by default to avoid blocking
+            async def allow_all(
+                _tool_name: str,
+                _tool_input: dict[str, Any],
+                _context: Any,
+            ) -> Any:
+                return PermissionResultAllow()
+
+            return allow_all
+
         # Create a wrapper that converts between SDK and CLI formats
         async def checker(
             tool_name: str,
@@ -646,33 +734,41 @@ class RipperdocSDKClient:
         ) -> Any:
             from ripperdoc_agent_sdk.types import PermissionResultAllow, PermissionResultDeny
 
-            # Call the original permission checker
-            if self.options.permission_checker:
-                result = self.options.permission_checker(
-                    tool_name,
-                    tool_input,
-                    context,
-                )
+            # Use can_use_tool callback if provided (Claude SDK behavior)
+            if can_use_tool_cb is not None:
+                result = can_use_tool_cb(tool_name, tool_input, context)
                 if asyncio.iscoroutine(result):
                     result = await result
-
-                # Convert result to SDK format
-                if isinstance(result, bool):
-                    return PermissionResultAllow() if result else PermissionResultDeny()
-                elif isinstance(result, tuple):
-                    allowed, message = result
-                    return PermissionResultAllow() if allowed else PermissionResultDeny(message=message)
-                elif isinstance(result, dict):
-                    if result.get("decision") == "allow":
-                        return PermissionResultAllow(updated_input=result.get("updated_input"))
-                    else:
-                        return PermissionResultDeny(message=result.get("message"), interrupt=result.get("interrupt", False))
-                elif isinstance(result, PermissionResult):
+                if isinstance(result, PermissionResultAllow) or isinstance(result, PermissionResultDeny):
                     return result
-                else:
-                    return PermissionResultAllow()
+                raise TypeError(
+                    "can_use_tool callback must return PermissionResultAllow or PermissionResultDeny"
+                )
 
-            # Default: allow
+            # Legacy permission_checker support (backward compatibility)
+            result = legacy_checker(  # type: ignore[misc]
+                tool_name,
+                tool_input,
+                context,
+            )
+            if asyncio.iscoroutine(result):
+                result = await result
+
+            # Convert legacy results to SDK format
+            if isinstance(result, bool):
+                return PermissionResultAllow() if result else PermissionResultDeny()
+            if isinstance(result, tuple):
+                allowed, message = result
+                return PermissionResultAllow() if allowed else PermissionResultDeny(message=message)
+            if isinstance(result, dict):
+                if result.get("decision") == "allow":
+                    return PermissionResultAllow(updated_input=result.get("updated_input"))
+                return PermissionResultDeny(
+                    message=result.get("message"),
+                    interrupt=result.get("interrupt", False),
+                )
+            if isinstance(result, PermissionResult):
+                return result
             return PermissionResultAllow()
 
         return checker
@@ -728,6 +824,12 @@ class RipperdocSDKClient:
             prompt: The prompt to send.
             session_id: Session identifier for the conversation (default: "default").
         """
+        if self.options.can_use_tool:
+            raise ValueError(
+                "can_use_tool callback requires streaming mode. "
+                "Use a streaming input instead of a string prompt."
+            )
+
         if self._current_task and not self._current_task.done():
             raise RuntimeError(
                 "A query is already in progress; wait for it to finish or interrupt it."
