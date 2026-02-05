@@ -1,8 +1,8 @@
 import asyncio
-from ripperdoc_agent_sdk import query, RipperdocAgentOptions
+from claude_agent_sdk import query, ClaudeAgentOptions
 
 async def main():
-    options = RipperdocAgentOptions(
+    options = ClaudeAgentOptions(
         system_prompt="You are an expert Python developer",
         permission_mode='acceptEdits',
     )
