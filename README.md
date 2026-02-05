@@ -2,6 +2,12 @@
 
 Python SDK for Ripperdoc AI Agent.
 
+## Overview
+
+This SDK is a fork of [Anthropic's Claude Agent SDK Python](https://github.com/anthropics/claude-agent-sdk-python) and maintains **full API compatibility** with it. The Ripperdoc SDK extends the original SDK with support for multiple LLM providers (not just Claude) while keeping the same interface and usage patterns.
+
+**Compatibility**: If you have code using `claude_agent_sdk`, you can easily migrate by simply changing the imports from `claude_agent_sdk` to `ripperdoc_agent_sdk` and using `RipperdocAgentOptions` instead of `ClaudeAgentOptions`. All other API calls remain the same.
+
 ## Features
 
 - **Subprocess Architecture**: Clean separation between SDK and CLI via JSON Control Protocol
@@ -239,4 +245,30 @@ Contributions are welcome! Please read our contributing guidelines before submit
 
 ## Related Projects
 
-- [Ripperdoc](https://github.com/your-org/ripperdoc) - The main Ripperdoc CLI
+- [Ripperdoc CLI](https://github.com/quantmew/ripperdoc) - The main Ripperdoc CLI that works with multiple LLM providers
+- [Claude Agent SDK Python](https://github.com/anthropics/claude-agent-sdk-python) - The original Anthropic SDK that this project is based on
+- [Claude Code](https://claude.com/claude-code) - Anthropic's official CLI tool
+
+## Migration from Claude Agent SDK
+
+If you're already using the Claude Agent SDK, migrating is straightforward:
+
+```python
+# Before (Claude Agent SDK)
+from claude_agent_sdk import query, ClaudeAgentOptions
+
+options = ClaudeAgentOptions(
+    system_prompt="You are a helpful assistant",
+    permission_mode='acceptEdits',
+)
+
+# After (Ripperdoc SDK)
+from ripperdoc_agent_sdk import query, RipperdocAgentOptions
+
+options = RipperdocAgentOptions(
+    system_prompt="You are a helpful assistant",
+    permission_mode='acceptEdits',
+)
+```
+
+The rest of your code remains exactly the same. The Ripperdoc SDK provides the same API with the added benefit of supporting multiple LLM providers beyond just Claude.
