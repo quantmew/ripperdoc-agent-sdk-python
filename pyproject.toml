@@ -25,7 +25,9 @@ classifiers = [
 
 dependencies = [
     "anyio>=4.0.0",
+    "mcp>=1.0.0",
     "pydantic>=2.0.0",
+    "typing_extensions>=4.0.0",
 ]
 
 [project.optional-dependencies]
