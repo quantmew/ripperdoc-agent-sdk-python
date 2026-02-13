@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ripperdoc-agent-sdk"
-version = "0.0.2"
+dynamic = ["version"]
 description = "Python SDK for Ripperdoc AI Agent"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -49,6 +49,9 @@ Repository = "https://github.com/quantmew/ripperdoc-agent-sdk-python"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["ripperdoc_agent_sdk*"]
+
+[tool.setuptools.dynamic]
+version = {attr = "ripperdoc_agent_sdk._version.__version__"}
 
 [tool.black]
 line-length = 100
