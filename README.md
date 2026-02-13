@@ -17,6 +17,12 @@ This SDK is a fork of [Anthropic's Claude Agent SDK Python](https://github.com/a
 
 ## Installation
 
+Install from PyPI:
+
+```bash
+pip install ripperdoc-agent-sdk
+```
+
 Install from GitHub:
 
 ```bash
