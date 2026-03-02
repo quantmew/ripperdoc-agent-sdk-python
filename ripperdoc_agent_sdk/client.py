@@ -3,7 +3,7 @@
 import json
 import os
 from collections.abc import AsyncIterable, AsyncIterator
-from dataclasses import replace
+from dataclasses import asdict, replace
 from typing import Any
 
 from . import Transport
@@ -147,6 +147,14 @@ class RipperdocSDKClient:
         )
         initialize_timeout = max(initialize_timeout_ms / 1000.0, 60.0)
 
+        # Convert agents to dict format for initialize request
+        agents_dict: dict[str, dict[str, Any]] | None = None
+        if self.options.agents:
+            agents_dict = {
+                name: {k: v for k, v in asdict(agent_def).items() if v is not None}
+                for name, agent_def in self.options.agents.items()
+            }
+
         # Create Query to handle control protocol
         self._query = Query(
             transport=self._transport,
@@ -157,6 +165,7 @@ class RipperdocSDKClient:
             else None,
             sdk_mcp_servers=sdk_mcp_servers,
             initialize_timeout=initialize_timeout,
+            agents=agents_dict,
         )
 
         # Start reading messages and initialize
@@ -175,7 +184,9 @@ class RipperdocSDKClient:
         from ._internal.message_parser import parse_message
 
         async for data in self._query.receive_messages():
-            yield parse_message(data)
+            message = parse_message(data)
+            if message is not None:
+                yield message
 
     async def query(
         self, prompt: str | AsyncIterable[dict[str, Any]], session_id: str = "default"
@@ -292,6 +303,32 @@ class RipperdocSDKClient:
         if not self._query:
             raise CLIConnectionError("Not connected. Call connect() first.")
         await self._query.rewind_files(user_message_id)
+
+    async def get_mcp_status(self) -> dict[str, Any]:
+        """Get current MCP server connection status (only works with streaming mode).
+
+        Queries the Ripperdoc Code CLI for the live connection status of all
+        configured MCP servers.
+
+        Returns:
+            Dictionary with MCP server status information. Contains a
+            'mcpServers' key with a list of server status objects, each having:
+            - 'name': Server name (str)
+            - 'status': Connection status ('connected', 'pending', 'failed',
+              'needs-auth', 'disabled')
+
+        Example:
+            ```python
+            async with RipperdocSDKClient(options) as client:
+                status = await client.get_mcp_status()
+                for server in status.get("mcpServers", []):
+                    print(f"{server['name']}: {server['status']}")
+            ```
+        """
+        if not self._query:
+            raise CLIConnectionError("Not connected. Call connect() first.")
+        result: dict[str, Any] = await self._query.get_mcp_status()
+        return result
 
     async def get_server_info(self) -> dict[str, Any] | None:
         """Get server initialization info including available commands and output styles.

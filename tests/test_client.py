@@ -1,57 +1,129 @@
-"""Tests for RipperdocSDKClient."""
+"""Tests for Ripperdoc SDK client functionality."""
 
-import pytest
+from unittest.mock import AsyncMock, Mock, patch
 
-from ripperdoc_agent_sdk import RipperdocSDKClient, RipperdocAgentOptions
+import anyio
+
+from ripperdoc_agent_sdk import AssistantMessage, RipperdocAgentOptions, query
+from ripperdoc_agent_sdk.types import TextBlock
 
 
-class TestRipperdocSDKClient:
-    """Tests for RipperdocSDKClient."""
+class TestQueryFunction:
+    """Test the main query function."""
 
-    def test_init_with_default_options(self):
-        """Test client initialization with default options."""
-        client = RipperdocSDKClient()
-        assert client.options is not None
-        assert isinstance(client.options, RipperdocAgentOptions)
-        assert client._custom_transport is None
-        assert client._transport is None
-        assert client._query is None
+    def test_query_single_prompt(self):
+        """Test query with a single prompt."""
 
-    def test_init_with_custom_options(self):
-        """Test client initialization with custom options."""
-        options = RipperdocAgentOptions(
-            permission_mode="acceptEdits",
-        )
-        client = RipperdocSDKClient(options=options)
-        assert client.options.permission_mode == "acceptEdits"
+        async def _test():
+            with patch(
+                "ripperdoc_agent_sdk._internal.client.InternalClient.process_query"
+            ) as mock_process:
+                # Mock the async generator
+                async def mock_generator():
+                    yield AssistantMessage(
+                        content=[TextBlock(text="4")], model="ripperdoc-opus-4-1-20250805"
+                    )
 
-    def test_init_with_transport(self):
-        """Test client initialization with custom transport."""
-        from ripperdoc_agent_sdk._internal.transport import Transport
+                mock_process.return_value = mock_generator()
 
-        class MockTransport(Transport):
-            async def connect(self):
-                pass
+                messages = []
+                async for msg in query(prompt="What is 2+2?"):
+                    messages.append(msg)
 
-            async def write(self, data: str):
-                pass
+                assert len(messages) == 1
+                assert isinstance(messages[0], AssistantMessage)
+                assert messages[0].content[0].text == "4"
 
-            async def close(self):
-                pass
+        anyio.run(_test)
 
-            def is_ready(self) -> bool:
-                return True
+    def test_query_with_options(self):
+        """Test query with various options."""
 
-            async def end_input(self):
-                pass
+        async def _test():
+            with patch(
+                "ripperdoc_agent_sdk._internal.client.InternalClient.process_query"
+            ) as mock_process:
 
-            def read_messages(self):
-                # Return an async iterator
-                async def gen():
-                    return
-                    yield
-                return gen()
+                async def mock_generator():
+                    yield AssistantMessage(
+                        content=[TextBlock(text="Hello!")],
+                        model="ripperdoc-opus-4-1-20250805",
+                    )
 
-        transport = MockTransport()
-        client = RipperdocSDKClient(transport=transport)
-        assert client._custom_transport == transport
+                mock_process.return_value = mock_generator()
+
+                options = RipperdocAgentOptions(
+                    allowed_tools=["Read", "Write"],
+                    system_prompt="You are helpful",
+                    permission_mode="acceptEdits",
+                    max_turns=5,
+                )
+
+                messages = []
+                async for msg in query(prompt="Hi", options=options):
+                    messages.append(msg)
+
+                # Verify process_query was called with correct prompt and options
+                mock_process.assert_called_once()
+                call_args = mock_process.call_args
+                assert call_args[1]["prompt"] == "Hi"
+                assert call_args[1]["options"] == options
+
+        anyio.run(_test)
+
+    def test_query_with_cwd(self):
+        """Test query with custom working directory."""
+
+        async def _test():
+            with (
+                patch(
+                    "ripperdoc_agent_sdk._internal.client.SubprocessCLITransport"
+                ) as mock_transport_class,
+                patch(
+                    "ripperdoc_agent_sdk._internal.query.Query.initialize",
+                    new_callable=AsyncMock,
+                ),
+            ):
+                mock_transport = AsyncMock()
+                mock_transport_class.return_value = mock_transport
+
+                # Mock the message stream
+                async def mock_receive():
+                    yield {
+                        "type": "assistant",
+                        "message": {
+                            "role": "assistant",
+                            "content": [{"type": "text", "text": "Done"}],
+                            "model": "ripperdoc-opus-4-1-20250805",
+                        },
+                    }
+                    yield {
+                        "type": "result",
+                        "subtype": "success",
+                        "duration_ms": 1000,
+                        "duration_api_ms": 800,
+                        "is_error": False,
+                        "num_turns": 1,
+                        "session_id": "test-session",
+                        "total_cost_usd": 0.001,
+                    }
+
+                mock_transport.read_messages = mock_receive
+                mock_transport.connect = AsyncMock()
+                mock_transport.close = AsyncMock()
+                mock_transport.end_input = AsyncMock()
+                mock_transport.write = AsyncMock()
+                mock_transport.is_ready = Mock(return_value=True)
+
+                options = RipperdocAgentOptions(cwd="/custom/path")
+                messages = []
+                async for msg in query(prompt="test", options=options):
+                    messages.append(msg)
+
+                # Verify transport was created with correct parameters
+                mock_transport_class.assert_called_once()
+                call_kwargs = mock_transport_class.call_args.kwargs
+                assert call_kwargs["prompt"] == "test"
+                assert call_kwargs["options"].cwd == "/custom/path"
+
+        anyio.run(_test)

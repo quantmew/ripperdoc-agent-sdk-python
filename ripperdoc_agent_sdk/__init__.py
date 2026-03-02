@@ -4,6 +4,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Generic, TypeVar
 
+from mcp.types import ToolAnnotations
+
 from ._errors import (
     RipperdocSDKError,
     CLIConnectionError,
@@ -30,11 +32,17 @@ from .types import (
     McpSdkServerConfig,
     McpServerConfig,
     Message,
+    NotificationHookInput,
+    NotificationHookSpecificOutput,
     PermissionMode,
+    PermissionRequestHookInput,
+    PermissionRequestHookSpecificOutput,
     PermissionResult,
     PermissionResultAllow,
     PermissionResultDeny,
     PermissionUpdate,
+    PostToolUseFailureHookInput,
+    PostToolUseFailureHookSpecificOutput,
     PostToolUseHookInput,
     PreCompactHookInput,
     PreToolUseHookInput,
@@ -46,10 +54,16 @@ from .types import (
     SdkPluginConfig,
     SettingSource,
     StopHookInput,
+    SubagentStartHookInput,
+    SubagentStartHookSpecificOutput,
     SubagentStopHookInput,
     SystemMessage,
     TextBlock,
     ThinkingBlock,
+    ThinkingConfig,
+    ThinkingConfigAdaptive,
+    ThinkingConfigDisabled,
+    ThinkingConfigEnabled,
     ToolPermissionContext,
     ToolResultBlock,
     ToolUseBlock,
@@ -70,10 +84,14 @@ class SdkMcpTool(Generic[T]):
     description: str
     input_schema: type[T] | dict[str, Any]
     handler: Callable[[T], Awaitable[dict[str, Any]]]
+    annotations: ToolAnnotations | None = None
 
 
 def tool(
-    name: str, description: str, input_schema: type | dict[str, Any]
+    name: str,
+    description: str,
+    input_schema: type | dict[str, Any],
+    annotations: ToolAnnotations | None = None,
 ) -> Callable[[Callable[[Any], Awaitable[dict[str, Any]]]], SdkMcpTool[Any]]:
     """Decorator for defining MCP tools with type safety.
 
@@ -130,6 +148,7 @@ def tool(
             description=description,
             input_schema=input_schema,
             handler=handler,
+            annotations=annotations,
         )
 
     return decorator
@@ -260,6 +279,7 @@ def create_sdk_mcp_server(
                         name=tool_def.name,
                         description=tool_def.description,
                         inputSchema=schema,
+                        annotations=tool_def.annotations,
                     )
                 )
             return tool_list
@@ -318,6 +338,10 @@ __all__ = [
     "RipperdocAgentOptions",
     "TextBlock",
     "ThinkingBlock",
+    "ThinkingConfig",
+    "ThinkingConfigAdaptive",
+    "ThinkingConfigEnabled",
+    "ThinkingConfigDisabled",
     "ToolUseBlock",
     "ToolResultBlock",
     "ContentBlock",
@@ -335,10 +359,18 @@ __all__ = [
     "BaseHookInput",
     "PreToolUseHookInput",
     "PostToolUseHookInput",
+    "PostToolUseFailureHookInput",
+    "PostToolUseFailureHookSpecificOutput",
     "UserPromptSubmitHookInput",
     "StopHookInput",
     "SubagentStopHookInput",
     "PreCompactHookInput",
+    "NotificationHookInput",
+    "SubagentStartHookInput",
+    "PermissionRequestHookInput",
+    "NotificationHookSpecificOutput",
+    "SubagentStartHookSpecificOutput",
+    "PermissionRequestHookSpecificOutput",
     "HookJSONOutput",
     "HookMatcher",
     # Agent support
@@ -356,6 +388,7 @@ __all__ = [
     "create_sdk_mcp_server",
     "tool",
     "SdkMcpTool",
+    "ToolAnnotations",
     # Errors
     "RipperdocSDKError",
     "CLIConnectionError",

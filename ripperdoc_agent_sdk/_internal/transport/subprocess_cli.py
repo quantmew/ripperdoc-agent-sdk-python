@@ -7,10 +7,8 @@ import platform
 import re
 import shutil
 import sys
-import tempfile
 from collections.abc import AsyncIterable, AsyncIterator
 from contextlib import suppress
-from dataclasses import asdict
 from pathlib import Path
 from subprocess import PIPE
 from typing import Any
@@ -29,12 +27,7 @@ from . import Transport
 logger = logging.getLogger(__name__)
 
 _DEFAULT_MAX_BUFFER_SIZE = 1024 * 1024  # 1MB buffer limit
-MINIMUM_RIPPERDOC_CODE_VERSION = "2.0.0"
-
-# Platform-specific command line length limits
-# Windows cmd.exe has a limit of 8191 characters, use 8000 for safety
-# Other platforms have much higher limits
-_CMD_LENGTH_LIMIT = 8000 if platform.system() == "Windows" else 100000
+MINIMUM_RIPPERDOC_CODE_VERSION = "0.4.0"
 
 
 class SubprocessCLITransport(Transport):
@@ -46,7 +39,9 @@ class SubprocessCLITransport(Transport):
         options: RipperdocAgentOptions,
     ):
         self._prompt = prompt
-        self._is_streaming = not isinstance(prompt, str)
+        # Always use streaming mode internally (matching TypeScript SDK)
+        # This allows agents and other large configs to be sent via initialize request
+        self._is_streaming = True
         self._options = options
         self._cli_path = (
             str(options.cli_path) if options.cli_path is not None else self._find_cli()
@@ -64,7 +59,6 @@ class SubprocessCLITransport(Transport):
             if options.max_buffer_size is not None
             else _DEFAULT_MAX_BUFFER_SIZE
         )
-        self._temp_files: list[str] = []  # Track temporary files for cleanup
         self._write_lock: anyio.Lock = anyio.Lock()
 
     def _find_cli(self) -> str:
@@ -93,7 +87,7 @@ class SubprocessCLITransport(Transport):
 
         raise CLINotFoundError(
             "Ripperdoc Code not found. Install with:\n"
-            "  npm install -g @ripperdoc-ai/ripperdoc-code\n"
+            "  npm install -g @anthropic-ai/ripperdoc-code\n"
             "\nIf already installed locally, try:\n"
             '  export PATH="$HOME/node_modules/.bin:$PATH"\n'
             "\nOr provide the path via RipperdocAgentOptions:\n"
@@ -276,13 +270,8 @@ class SubprocessCLITransport(Transport):
         if self._options.fork_session:
             cmd.append("--fork-session")
 
-        if self._options.agents:
-            agents_dict = {
-                name: {k: v for k, v in asdict(agent_def).items() if v is not None}
-                for name, agent_def in self._options.agents.items()
-            }
-            agents_json = json.dumps(agents_dict)
-            cmd.extend(["--agents", agents_json])
+        # Agents are always sent via initialize request (matching TypeScript SDK)
+        # No --agents CLI flag needed
 
         sources_value = (
             ",".join(self._options.setting_sources)
@@ -308,10 +297,23 @@ class SubprocessCLITransport(Transport):
                 # Flag with value
                 cmd.extend([f"--{flag}", str(value)])
 
-        if self._options.max_thinking_tokens is not None:
-            cmd.extend(
-                ["--max-thinking-tokens", str(self._options.max_thinking_tokens)]
-            )
+        # Resolve thinking config → --max-thinking-tokens
+        # `thinking` takes precedence over the deprecated `max_thinking_tokens`
+        resolved_max_thinking_tokens = self._options.max_thinking_tokens
+        if self._options.thinking is not None:
+            t = self._options.thinking
+            if t["type"] == "adaptive":
+                if resolved_max_thinking_tokens is None:
+                    resolved_max_thinking_tokens = 32_000
+            elif t["type"] == "enabled":
+                resolved_max_thinking_tokens = t["budget_tokens"]
+            elif t["type"] == "disabled":
+                resolved_max_thinking_tokens = 0
+        if resolved_max_thinking_tokens is not None:
+            cmd.extend(["--max-thinking-tokens", str(resolved_max_thinking_tokens)])
+
+        if self._options.effort is not None:
+            cmd.extend(["--effort", self._options.effort])
 
         # Extract schema from output_format structure if provided
         # Expected: {"type": "json_schema", "schema": {...}}
@@ -324,45 +326,9 @@ class SubprocessCLITransport(Transport):
             if schema is not None:
                 cmd.extend(["--json-schema", json.dumps(schema)])
 
-        # Add prompt handling based on mode
-        # IMPORTANT: This must come AFTER all flags because everything after "--" is treated as arguments
-        if self._is_streaming:
-            # Streaming mode: use --input-format stream-json
-            cmd.extend(["--input-format", "stream-json"])
-        else:
-            # String mode: use --print with the prompt
-            cmd.extend(["--print", "--", str(self._prompt)])
-
-        # Check if command line is too long (Windows limitation)
-        cmd_str = " ".join(cmd)
-        if len(cmd_str) > _CMD_LENGTH_LIMIT and self._options.agents:
-            # Command is too long - use temp file for agents
-            # Find the --agents argument and replace its value with @filepath
-            try:
-                agents_idx = cmd.index("--agents")
-                agents_json_value = cmd[agents_idx + 1]
-
-                # Create a temporary file
-                # ruff: noqa: SIM115
-                temp_file = tempfile.NamedTemporaryFile(
-                    mode="w", suffix=".json", delete=False, encoding="utf-8"
-                )
-                temp_file.write(agents_json_value)
-                temp_file.close()
-
-                # Track for cleanup
-                self._temp_files.append(temp_file.name)
-
-                # Replace agents JSON with @filepath reference
-                cmd[agents_idx + 1] = f"@{temp_file.name}"
-
-                logger.info(
-                    f"Command line length ({len(cmd_str)}) exceeds limit ({_CMD_LENGTH_LIMIT}). "
-                    f"Using temp file for --agents: {temp_file.name}"
-                )
-            except (ValueError, IndexError) as e:
-                # This shouldn't happen, but log it just in case
-                logger.warning(f"Failed to optimize command line length: {e}")
+        # Always use streaming mode with stdin (matching TypeScript SDK)
+        # This allows agents and other large configs to be sent via initialize request
+        cmd.extend(["--input-format", "stream-json"])
 
         return cmd
 
@@ -421,12 +387,9 @@ class SubprocessCLITransport(Transport):
                 await self._stderr_task_group.__aenter__()
                 self._stderr_task_group.start_soon(self._handle_stderr)
 
-            # Setup stdin for streaming mode
-            if self._is_streaming and self._process.stdin:
+            # Setup stdin for streaming (always used now)
+            if self._process.stdin:
                 self._stdin_stream = TextSendStream(self._process.stdin)
-            elif not self._is_streaming and self._process.stdin:
-                # String mode: close stdin immediately
-                await self._process.stdin.aclose()
 
             self._ready = True
 
@@ -476,12 +439,6 @@ class SubprocessCLITransport(Transport):
 
     async def close(self) -> None:
         """Close the transport and clean up resources."""
-        # Clean up temporary files first (before early return)
-        for temp_file in self._temp_files:
-            with suppress(Exception):
-                Path(temp_file).unlink(missing_ok=True)
-        self._temp_files.clear()
-
         if not self._process:
             self._ready = False
             return

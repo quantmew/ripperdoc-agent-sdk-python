@@ -1,173 +1,277 @@
-"""Tests for type definitions."""
+"""Tests for Ripperdoc SDK type definitions."""
 
-import pytest
-
+from ripperdoc_agent_sdk import (
+    AssistantMessage,
+    RipperdocAgentOptions,
+    NotificationHookInput,
+    NotificationHookSpecificOutput,
+    PermissionRequestHookInput,
+    PermissionRequestHookSpecificOutput,
+    ResultMessage,
+    SubagentStartHookInput,
+    SubagentStartHookSpecificOutput,
+)
 from ripperdoc_agent_sdk.types import (
-    AgentDefinition,
-    PermissionRuleValue,
-    PermissionUpdate,
-    PermissionUpdateDestination,
-    SystemPromptPreset,
-    ToolsPreset,
+    PostToolUseHookSpecificOutput,
+    PreToolUseHookSpecificOutput,
+    TextBlock,
+    ThinkingBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+    UserMessage,
 )
 
 
-class TestPermissionUpdateDestination:
-    """Tests for PermissionUpdateDestination literal."""
+class TestMessageTypes:
+    """Test message type creation and validation."""
 
-    def test_valid_destinations(self):
-        """Test valid permission update destinations."""
-        valid: list[PermissionUpdateDestination] = [
-            "userSettings",
-            "projectSettings",
-            "localSettings",
-            "session",
-        ]
-        assert len(valid) == 4
+    def test_user_message_creation(self):
+        """Test creating a UserMessage."""
+        msg = UserMessage(content="Hello, Ripperdoc!")
+        assert msg.content == "Hello, Ripperdoc!"
+
+    def test_assistant_message_with_text(self):
+        """Test creating an AssistantMessage with text content."""
+        text_block = TextBlock(text="Hello, human!")
+        msg = AssistantMessage(content=[text_block], model="ripperdoc-opus-4-1-20250805")
+        assert len(msg.content) == 1
+        assert msg.content[0].text == "Hello, human!"
+
+    def test_assistant_message_with_thinking(self):
+        """Test creating an AssistantMessage with thinking content."""
+        thinking_block = ThinkingBlock(thinking="I'm thinking...", signature="sig-123")
+        msg = AssistantMessage(
+            content=[thinking_block], model="ripperdoc-opus-4-1-20250805"
+        )
+        assert len(msg.content) == 1
+        assert msg.content[0].thinking == "I'm thinking..."
+        assert msg.content[0].signature == "sig-123"
+
+    def test_tool_use_block(self):
+        """Test creating a ToolUseBlock."""
+        block = ToolUseBlock(
+            id="tool-123", name="Read", input={"file_path": "/test.txt"}
+        )
+        assert block.id == "tool-123"
+        assert block.name == "Read"
+        assert block.input["file_path"] == "/test.txt"
+
+    def test_tool_result_block(self):
+        """Test creating a ToolResultBlock."""
+        block = ToolResultBlock(
+            tool_use_id="tool-123", content="File contents here", is_error=False
+        )
+        assert block.tool_use_id == "tool-123"
+        assert block.content == "File contents here"
+        assert block.is_error is False
+
+    def test_result_message(self):
+        """Test creating a ResultMessage."""
+        msg = ResultMessage(
+            subtype="success",
+            duration_ms=1500,
+            duration_api_ms=1200,
+            is_error=False,
+            num_turns=1,
+            session_id="session-123",
+            total_cost_usd=0.01,
+        )
+        assert msg.subtype == "success"
+        assert msg.total_cost_usd == 0.01
+        assert msg.session_id == "session-123"
 
 
-class TestSystemPromptPreset:
-    """Tests for SystemPromptPreset TypedDict."""
+class TestOptions:
+    """Test Options configuration."""
 
-    def test_minimal_preset(self):
-        """Test minimal system prompt preset."""
-        preset: SystemPromptPreset = {
+    def test_default_options(self):
+        """Test Options with default values."""
+        options = RipperdocAgentOptions()
+        assert options.allowed_tools == []
+        assert options.system_prompt is None
+        assert options.permission_mode is None
+        assert options.continue_conversation is False
+        assert options.disallowed_tools == []
+
+    def test_ripperdoc_code_options_with_tools(self):
+        """Test Options with built-in tools."""
+        options = RipperdocAgentOptions(
+            allowed_tools=["Read", "Write", "Edit"], disallowed_tools=["Bash"]
+        )
+        assert options.allowed_tools == ["Read", "Write", "Edit"]
+        assert options.disallowed_tools == ["Bash"]
+
+    def test_ripperdoc_code_options_with_permission_mode(self):
+        """Test Options with permission mode."""
+        options = RipperdocAgentOptions(permission_mode="bypassPermissions")
+        assert options.permission_mode == "bypassPermissions"
+
+        options_plan = RipperdocAgentOptions(permission_mode="plan")
+        assert options_plan.permission_mode == "plan"
+
+        options_default = RipperdocAgentOptions(permission_mode="default")
+        assert options_default.permission_mode == "default"
+
+        options_accept = RipperdocAgentOptions(permission_mode="acceptEdits")
+        assert options_accept.permission_mode == "acceptEdits"
+
+    def test_ripperdoc_code_options_with_system_prompt_string(self):
+        """Test Options with system prompt as string."""
+        options = RipperdocAgentOptions(
+            system_prompt="You are a helpful assistant.",
+        )
+        assert options.system_prompt == "You are a helpful assistant."
+
+    def test_ripperdoc_code_options_with_system_prompt_preset(self):
+        """Test Options with system prompt preset."""
+        options = RipperdocAgentOptions(
+            system_prompt={"type": "preset", "preset": "ripperdoc_code"},
+        )
+        assert options.system_prompt == {"type": "preset", "preset": "ripperdoc_code"}
+
+    def test_ripperdoc_code_options_with_system_prompt_preset_and_append(self):
+        """Test Options with system prompt preset and append."""
+        options = RipperdocAgentOptions(
+            system_prompt={
+                "type": "preset",
+                "preset": "ripperdoc_code",
+                "append": "Be concise.",
+            },
+        )
+        assert options.system_prompt == {
             "type": "preset",
             "preset": "ripperdoc_code",
+            "append": "Be concise.",
         }
-        assert preset["type"] == "preset"
-        assert preset["preset"] == "ripperdoc_code"
 
-    def test_preset_with_append(self):
-        """Test system prompt preset with append."""
-        preset: SystemPromptPreset = {
-            "type": "preset",
-            "preset": "ripperdoc_code",
-            "append": "Additional instructions",
+    def test_ripperdoc_code_options_with_session_continuation(self):
+        """Test Options with session continuation."""
+        options = RipperdocAgentOptions(continue_conversation=True, resume="session-123")
+        assert options.continue_conversation is True
+        assert options.resume == "session-123"
+
+    def test_ripperdoc_code_options_with_model_specification(self):
+        """Test Options with model specification."""
+        options = RipperdocAgentOptions(
+            model="ripperdoc-sonnet-4-5", permission_prompt_tool_name="CustomTool"
+        )
+        assert options.model == "ripperdoc-sonnet-4-5"
+        assert options.permission_prompt_tool_name == "CustomTool"
+
+
+class TestHookInputTypes:
+    """Test hook input type definitions."""
+
+    def test_notification_hook_input(self):
+        """Test NotificationHookInput construction."""
+        hook_input: NotificationHookInput = {
+            "session_id": "sess-1",
+            "transcript_path": "/tmp/transcript",
+            "cwd": "/home/user",
+            "hook_event_name": "Notification",
+            "message": "Task completed",
+            "notification_type": "info",
         }
-        assert preset["append"] == "Additional instructions"
+        assert hook_input["hook_event_name"] == "Notification"
+        assert hook_input["message"] == "Task completed"
+        assert hook_input["notification_type"] == "info"
 
-
-class TestToolsPreset:
-    """Tests for ToolsPreset TypedDict."""
-
-    def test_tools_preset(self):
-        """Test tools preset."""
-        preset: ToolsPreset = {
-            "type": "preset",
-            "preset": "ripperdoc_code",
+    def test_notification_hook_input_with_title(self):
+        """Test NotificationHookInput with optional title."""
+        hook_input: NotificationHookInput = {
+            "session_id": "sess-1",
+            "transcript_path": "/tmp/transcript",
+            "cwd": "/home/user",
+            "hook_event_name": "Notification",
+            "message": "Task completed",
+            "notification_type": "info",
+            "title": "Success",
         }
-        assert preset["type"] == "preset"
-        assert preset["preset"] == "ripperdoc_code"
+        assert hook_input["title"] == "Success"
+
+    def test_subagent_start_hook_input(self):
+        """Test SubagentStartHookInput construction."""
+        hook_input: SubagentStartHookInput = {
+            "session_id": "sess-1",
+            "transcript_path": "/tmp/transcript",
+            "cwd": "/home/user",
+            "hook_event_name": "SubagentStart",
+            "agent_id": "agent-42",
+            "agent_type": "researcher",
+        }
+        assert hook_input["hook_event_name"] == "SubagentStart"
+        assert hook_input["agent_id"] == "agent-42"
+        assert hook_input["agent_type"] == "researcher"
+
+    def test_permission_request_hook_input(self):
+        """Test PermissionRequestHookInput construction."""
+        hook_input: PermissionRequestHookInput = {
+            "session_id": "sess-1",
+            "transcript_path": "/tmp/transcript",
+            "cwd": "/home/user",
+            "hook_event_name": "PermissionRequest",
+            "tool_name": "Bash",
+            "tool_input": {"command": "ls"},
+        }
+        assert hook_input["hook_event_name"] == "PermissionRequest"
+        assert hook_input["tool_name"] == "Bash"
+        assert hook_input["tool_input"] == {"command": "ls"}
+
+    def test_permission_request_hook_input_with_suggestions(self):
+        """Test PermissionRequestHookInput with optional permission_suggestions."""
+        hook_input: PermissionRequestHookInput = {
+            "session_id": "sess-1",
+            "transcript_path": "/tmp/transcript",
+            "cwd": "/home/user",
+            "hook_event_name": "PermissionRequest",
+            "tool_name": "Bash",
+            "tool_input": {"command": "ls"},
+            "permission_suggestions": [{"type": "allow", "rule": "Bash(*)"}],
+        }
+        assert len(hook_input["permission_suggestions"]) == 1
 
 
-class TestAgentDefinition:
-    """Tests for AgentDefinition dataclass."""
+class TestHookSpecificOutputTypes:
+    """Test hook-specific output type definitions."""
 
-    def test_minimal_agent(self):
-        """Test minimal agent definition."""
-        agent = AgentDefinition(
-            description="Test agent",
-            prompt="You are a test agent",
-        )
-        assert agent.description == "Test agent"
-        assert agent.prompt == "You are a test agent"
-        assert agent.tools is None
-        assert agent.model is None
+    def test_notification_hook_specific_output(self):
+        """Test NotificationHookSpecificOutput construction."""
+        output: NotificationHookSpecificOutput = {
+            "hookEventName": "Notification",
+            "additionalContext": "Extra info",
+        }
+        assert output["hookEventName"] == "Notification"
+        assert output["additionalContext"] == "Extra info"
 
-    def test_agent_with_tools(self):
-        """Test agent definition with tools."""
-        agent = AgentDefinition(
-            description="Test agent",
-            prompt="You are a test agent",
-            tools=["bash", "edit"],
-        )
-        assert agent.tools == ["bash", "edit"]
+    def test_subagent_start_hook_specific_output(self):
+        """Test SubagentStartHookSpecificOutput construction."""
+        output: SubagentStartHookSpecificOutput = {
+            "hookEventName": "SubagentStart",
+            "additionalContext": "Starting subagent for research",
+        }
+        assert output["hookEventName"] == "SubagentStart"
 
-    def test_agent_with_model(self):
-        """Test agent definition with model."""
-        agent = AgentDefinition(
-            description="Test agent",
-            prompt="You are a test agent",
-            model="sonnet",
-        )
-        assert agent.model == "sonnet"
+    def test_permission_request_hook_specific_output(self):
+        """Test PermissionRequestHookSpecificOutput construction."""
+        output: PermissionRequestHookSpecificOutput = {
+            "hookEventName": "PermissionRequest",
+            "decision": {"type": "allow"},
+        }
+        assert output["hookEventName"] == "PermissionRequest"
+        assert output["decision"] == {"type": "allow"}
 
-    def test_agent_with_all_fields(self):
-        """Test agent definition with all fields."""
-        agent = AgentDefinition(
-            description="Full agent",
-            prompt="Full prompt",
-            tools=["bash", "edit", "grep"],
-            model="opus",
-        )
-        assert agent.description == "Full agent"
-        assert agent.prompt == "Full prompt"
-        assert agent.tools == ["bash", "edit", "grep"]
-        assert agent.model == "opus"
+    def test_pre_tool_use_output_has_additional_context(self):
+        """Test PreToolUseHookSpecificOutput includes additionalContext field."""
+        output: PreToolUseHookSpecificOutput = {
+            "hookEventName": "PreToolUse",
+            "additionalContext": "context for ripperdoc",
+        }
+        assert output["additionalContext"] == "context for ripperdoc"
 
-
-class TestPermissionRuleValue:
-    """Tests for PermissionRuleValue dataclass."""
-
-    def test_minimal_rule(self):
-        """Test minimal permission rule."""
-        rule = PermissionRuleValue(tool_name="bash")
-        assert rule.tool_name == "bash"
-        assert rule.rule_content is None
-
-    def test_rule_with_content(self):
-        """Test permission rule with content."""
-        rule = PermissionRuleValue(
-            tool_name="edit",
-            rule_content="allow",
-        )
-        assert rule.tool_name == "edit"
-        assert rule.rule_content == "allow"
-
-
-class TestPermissionUpdate:
-    """Tests for PermissionUpdate dataclass."""
-
-    def test_add_rules(self):
-        """Test add rules permission update."""
-        update = PermissionUpdate(
-            type="addRules",
-            rules=[
-                PermissionRuleValue(tool_name="bash"),
-                PermissionRuleValue(tool_name="edit"),
-            ],
-        )
-        assert update.type == "addRules"
-        assert len(update.rules) == 2
-
-    def test_replace_rules(self):
-        """Test replace rules permission update."""
-        update = PermissionUpdate(
-            type="replaceRules",
-            rules=[PermissionRuleValue(tool_name="bash")],
-        )
-        assert update.type == "replaceRules"
-
-    def test_remove_rules(self):
-        """Test remove rules permission update."""
-        update = PermissionUpdate(
-            type="removeRules",
-            rules=[PermissionRuleValue(tool_name="bash")],
-        )
-        assert update.type == "removeRules"
-
-    def test_set_mode(self):
-        """Test set mode permission update."""
-        update = PermissionUpdate(type="setMode")
-        assert update.type == "setMode"
-
-    def test_add_directories(self):
-        """Test add directories permission update."""
-        update = PermissionUpdate(type="addDirectories")
-        assert update.type == "addDirectories"
-
-    def test_remove_directories(self):
-        """Test remove directories permission update."""
-        update = PermissionUpdate(type="removeDirectories")
-        assert update.type == "removeDirectories"
+    def test_post_tool_use_output_has_updated_mcp_tool_output(self):
+        """Test PostToolUseHookSpecificOutput includes updatedMCPToolOutput field."""
+        output: PostToolUseHookSpecificOutput = {
+            "hookEventName": "PostToolUse",
+            "updatedMCPToolOutput": {"result": "modified"},
+        }
+        assert output["updatedMCPToolOutput"] == {"result": "modified"}

@@ -21,7 +21,7 @@ from ..types import (
 logger = logging.getLogger(__name__)
 
 
-def parse_message(data: dict[str, Any]) -> Message:
+def parse_message(data: dict[str, Any]) -> Message | None:
     """
     Parse message from CLI output into typed Message objects.
 
@@ -126,7 +126,7 @@ def parse_message(data: dict[str, Any]) -> Message:
                     content=content_blocks,
                     model=data["message"]["model"],
                     parent_tool_use_id=data.get("parent_tool_use_id"),
-                    error=data["message"].get("error"),
+                    error=data.get("error"),
                 )
             except KeyError as e:
                 raise MessageParseError(
@@ -177,4 +177,7 @@ def parse_message(data: dict[str, Any]) -> Message:
                 ) from e
 
         case _:
-            raise MessageParseError(f"Unknown message type: {message_type}", data)
+            # Forward-compatible: skip unrecognized message types so newer
+            # CLI versions don't crash older SDK versions.
+            logger.debug("Skipping unknown message type: %s", message_type)
+            return None
